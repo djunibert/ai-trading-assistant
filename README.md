@@ -7,7 +7,7 @@
 **Nom :** Junior-Hébert Derifond  
 **Programme :** AEC Intelligence Artificielle  
 **Cours :**
-- 420-A57-BB – Mise en place d'un écosystème d'IA
+- 420-A62-BB - Projet de synthèse (T)
 - 420-A61-BB – Préparation de la solution d'IA pour la mise en production
 
 **Rôle :**

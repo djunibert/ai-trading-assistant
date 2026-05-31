@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+
+# Environnements virtuels
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Données
+data/raw/
+data/processed/
+
+# Modèles
+models/*.pkl
+models/*.joblib
+
+# MLFlow
+mlruns/
+
+# DVC cache
+.dvc/cache/
+
+# VS Code
+.vscode/
+
+# Logs
+*.log

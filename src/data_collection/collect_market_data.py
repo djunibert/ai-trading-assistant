@@ -1,39 +1,37 @@
-from pathlib import Path
 import yfinance as yf
 
-
-MARKET_SYMBOLS = {
-    "gold": "GC=F",
-    "silver": "SI=F",
-    "nasdaq": "NQ=F",
-    "sp500": "ES=F",
-}
+from src.utils.config import MARKET_SYMBOLS, START_DATE
+from src.utils.paths import RAW_MARKET_DIR
+from src.utils.logger import get_logger
 
 
-def collect_market_data(start_date="2020-01-01", interval="1d"):
-    output_dir = Path("data/raw/market")
-    output_dir.mkdir(parents=True, exist_ok=True)
+logger = get_logger(__name__)
+
+
+def collect_market_data(interval: str = "1d") -> None:
+    RAW_MARKET_DIR.mkdir(parents=True, exist_ok=True)
 
     for name, symbol in MARKET_SYMBOLS.items():
-        print(f"Collecte de {name} ({symbol})...")
+        logger.info(f"Collecte de {name} ({symbol})")
 
         df = yf.download(
             symbol,
-            start=start_date,
+            start=START_DATE,
             interval=interval,
             auto_adjust=False,
-            progress=False
+            progress=False,
         )
 
         if df.empty:
-            print(f"Aucune donnée trouvée pour {name}")
+            logger.warning(f"Aucune donnée trouvée pour {name}")
             continue
 
         df = df.reset_index()
-        output_path = output_dir / f"{name}.csv"
-        df.to_csv(output_path, index=False)
 
-        print(f"Fichier créé : {output_path}")
+        output_path = RAW_MARKET_DIR / f"{name}.csv"
+        df.to_csv(output_path, index=False, encoding="utf-8-sig")
+
+        logger.info(f"Fichier créé : {output_path}")
 
 
 if __name__ == "__main__":

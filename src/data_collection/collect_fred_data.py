@@ -1,26 +1,62 @@
-import os
-from pathlib import Path
+"""
+Module : collect_fred_data.py
+
+Description
+-----------
+Ce module permet de télécharger les principaux indicateurs
+macroéconomiques depuis l'API FRED.
+
+Les données sont sauvegardées dans :
+data/raw/macro/macro_fred.csv
+
+Indicateurs collectés :
+    - CPI
+    - NFP
+    - Fed Funds Rate
+    - Unemployment Rate
+
+Auteur : Junior Hébert
+Projet : AI Trading System
+Version : 1.0
+"""
 
 import pandas as pd
 import requests
-from dotenv import load_dotenv
+
+from src.utils.config import (
+    FRED_API_KEY,
+    FRED_SERIES,
+    START_DATE,
+)
+
+from src.utils.paths import RAW_MACRO_DIR
+from src.utils.logger import get_logger
 
 
-load_dotenv()
-
-FRED_API_KEY = os.getenv("FRED_API_KEY")
-
-SERIES = {
-    "cpi": "CPIAUCSL",
-    "nfp": "PAYEMS",
-    "fed_rate": "FEDFUNDS",
-    "unemployment_rate": "UNRATE",
-}
+# Initialisation du logger
+logger = get_logger(__name__)
 
 
 def collect_fred_series(name: str, series_id: str) -> pd.DataFrame:
+    """
+    Télécharge une série économique depuis FRED.
+
+    Args:
+        name (str):
+            Nom de l'indicateur.
+
+        series_id (str):
+            Identifiant officiel de la série FRED.
+
+    Returns:
+        pd.DataFrame:
+            DataFrame contenant :
+                datetime
+                valeur
+    """
+
     if not FRED_API_KEY:
-        raise ValueError("FRED_API_KEY est manquant. Vérifie ton fichier .env")
+        raise ValueError("FRED_API_KEY est absent du fichier .env")
 
     url = "https://api.stlouisfed.org/fred/series/observations"
 
@@ -28,49 +64,88 @@ def collect_fred_series(name: str, series_id: str) -> pd.DataFrame:
         "series_id": series_id,
         "api_key": FRED_API_KEY,
         "file_type": "json",
-        "observation_start": "2020-01-01",
+        "observation_start": START_DATE,
     }
 
+    logger.info(f"Téléchargement : {name}")
+
     response = requests.get(url, params=params, timeout=30)
+
     response.raise_for_status()
 
     data = response.json()["observations"]
 
     df = pd.DataFrame(data)
-    df = df[["date", "value"]]
-    df["date"] = pd.to_datetime(df["date"])
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
 
-    df = df.rename(columns={
-        "date": "datetime",
-        "value": name
-    })
+    df = df[["date", "value"]]
+
+    df["date"] = pd.to_datetime(df["date"])
+
+    df["value"] = pd.to_numeric(
+        df["value"],
+        errors="coerce"
+    )
+
+    df = df.rename(
+        columns={
+            "date": "datetime",
+            "value": name,
+        }
+    )
 
     return df
 
 
-def collect_fred_data() -> None:
-    output_dir = Path("data/raw/macro")
-    output_dir.mkdir(parents=True, exist_ok=True)
+def collect_fred_data():
+    """
+    Télécharge toutes les séries macroéconomiques
+    définies dans config.py puis les fusionne
+    dans un seul fichier CSV.
+    """
+
+    logger.info("Début de la collecte FRED...")
+
+    RAW_MACRO_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     final_df = None
 
-    for name, series_id in SERIES.items():
-        print(f"Collecte de {name} ({series_id})...")
-        df = collect_fred_series(name, series_id)
+    for name, series_id in FRED_SERIES.items():
+
+        df = collect_fred_series(
+            name,
+            series_id
+        )
 
         if final_df is None:
             final_df = df
+
         else:
-            final_df = final_df.merge(df, on="datetime", how="outer")
+            final_df = final_df.merge(
+                df,
+                on="datetime",
+                how="outer"
+            )
 
-    final_df = final_df.sort_values("datetime")
+    final_df = final_df.sort_values(
+        by="datetime"
+    )
 
-    output_path = output_dir / "macro_fred.csv"
-    final_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    output_file = RAW_MACRO_DIR / "macro_fred.csv"
 
-    print(f"Fichier créé : {output_path}")
+    final_df.to_csv(
+        output_file,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
+    logger.info(f"Fichier créé : {output_file}")
+
+    logger.info("Collecte FRED terminée.")
 
 
 if __name__ == "__main__":
+
     collect_fred_data()

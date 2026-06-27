@@ -13,8 +13,8 @@ Auteur : Junior Hébert
 Projet : AI Trading System
 """
 
-from src.data_collection.collect_market_data import collect_market_data
-from src.data_collection.collect_fred_data import collect_fred_data
+from src.collectors.yahoo_collector import collect_market_data
+from src.collectors.fred_collector import collect_fred_data
 from src.utils.logger import get_logger
 
 

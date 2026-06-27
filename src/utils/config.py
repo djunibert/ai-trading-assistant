@@ -22,3 +22,12 @@ FRED_SERIES = {
     "fed_rate": "FEDFUNDS",
     "unemployment_rate": "UNRATE",
 }
+
+FMP_API_KEY = os.getenv("FMP_API_KEY")
+
+ECONOMIC_EVENTS_KEYWORDS = [
+    "CPI",
+    "Nonfarm Payrolls",
+    "FOMC",
+    "Interest Rate Decision",
+]

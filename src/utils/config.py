@@ -23,6 +23,33 @@ FRED_SERIES = {
     "unemployment_rate": "UNRATE",
 }
 
+MARKET_INTERVALS = {
+    "1d": {
+        "interval": "1d",
+        "period": "5y"
+    },
+    "4h": {
+        "interval": "4h",
+        "period": "2y"
+    },
+    "1h": {
+        "interval": "1h",
+        "period": "2y"
+    },
+    "15m": {
+        "interval": "15m",
+        "period": "60d"
+    },
+    "5m": {
+        "interval": "5m",
+        "period": "30d"
+    },
+    "1m": {
+        "interval": "1m",
+        "period": "7d"
+    },
+}
+
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 
 ECONOMIC_EVENTS_KEYWORDS = [

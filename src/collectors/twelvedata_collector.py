@@ -1,24 +1,35 @@
 """
-Module : yahoo_collector.py
+Module : twelvedata_collector.py
 
-Collecteur Yahoo Finance basé sur BaseMarketCollector.
+Collecteur Twelve Data basé sur BaseMarketCollector.
 """
 
 import pandas as pd
-import yfinance as yf
+from twelvedata import TDClient
 
 from src.collectors.base_market_collector import BaseMarketCollector
-from src.utils.config import YAHOO_SYMBOLS, YAHOO_INTERVALS
-from src.utils.paths import RAW_MARKET_DIR
+from src.utils.config import (
+    TWELVEDATA_API_KEY,
+    TWELVEDATA_SYMBOLS,
+    TWELVEDATA_INTERVALS,
+    TWELVEDATA_OUTPUTSIZE,
+    TIMEZONE,
+)
+from src.utils.paths import RAW_DIR
 
 
-class YahooMarketCollector(BaseMarketCollector):
+class TwelveDataMarketCollector(BaseMarketCollector):
     """
-    Collecteur de données de marché depuis Yahoo Finance.
+    Collecteur de données de marché depuis Twelve Data.
     """
 
     def __init__(self):
-        super().__init__(source_name="yahoo")
+        super().__init__(source_name="twelvedata")
+
+        if not TWELVEDATA_API_KEY:
+            raise ValueError("TWELVEDATA_API_KEY manquant dans le fichier .env")
+
+        self.client = TDClient(apikey=TWELVEDATA_API_KEY)
 
     def download_symbol(
         self,
@@ -26,20 +37,17 @@ class YahooMarketCollector(BaseMarketCollector):
         interval: str,
         period: str | None = None,
     ) -> pd.DataFrame:
-        return yf.download(
-            tickers=symbol,
+        ts = self.client.time_series(
+            symbol=symbol,
             interval=interval,
-            period=period,
-            auto_adjust=False,
-            progress=False,
+            outputsize=TWELVEDATA_OUTPUTSIZE,
+            timezone=TIMEZONE,
         )
+
+        return ts.as_pandas()
 
     def clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
         df = df.reset_index()
 
         df.columns = [
@@ -47,11 +55,8 @@ class YahooMarketCollector(BaseMarketCollector):
             for col in df.columns
         ]
 
-        if "date" in df.columns:
-            df = df.rename(columns={"date": "datetime"})
-
         if "datetime" not in df.columns:
-            raise ValueError("Colonne datetime introuvable dans les données Yahoo.")
+            raise ValueError("Colonne datetime introuvable dans les données Twelve Data.")
 
         df["datetime"] = pd.to_datetime(
             df["datetime"],
@@ -64,7 +69,6 @@ class YahooMarketCollector(BaseMarketCollector):
             "high",
             "low",
             "close",
-            "adj_close",
             "volume",
         ]
 
@@ -82,16 +86,16 @@ class YahooMarketCollector(BaseMarketCollector):
         df.to_csv(output_file, index=False, encoding="utf-8-sig")
 
     def collect(self) -> None:
-        self.logger.info("Début collecte Yahoo Finance")
+        self.logger.info("Début collecte Twelve Data")
 
-        for timeframe, config in YAHOO_INTERVALS.items():
-            interval = config["interval"]
-            period = config["period"]
+        output_base_dir = RAW_DIR / "market_twelvedata"
+        output_base_dir.mkdir(parents=True, exist_ok=True)
 
-            timeframe_dir = RAW_MARKET_DIR / timeframe
+        for timeframe, interval in TWELVEDATA_INTERVALS.items():
+            timeframe_dir = output_base_dir / timeframe
             timeframe_dir.mkdir(parents=True, exist_ok=True)
 
-            for asset_name, symbol in YAHOO_SYMBOLS.items():
+            for asset_name, symbol in TWELVEDATA_SYMBOLS.items():
                 self.logger.info(
                     f"Collecte : {asset_name} ({symbol}) [{timeframe}]"
                 )
@@ -100,7 +104,6 @@ class YahooMarketCollector(BaseMarketCollector):
                     df = self.download_symbol(
                         symbol=symbol,
                         interval=interval,
-                        period=period,
                     )
 
                     if df.empty:
@@ -124,21 +127,16 @@ class YahooMarketCollector(BaseMarketCollector):
 
                 except Exception as error:
                     self.logger.error(
-                        f"Erreur Yahoo ({asset_name}, {timeframe}) : {error}"
+                        f"Erreur Twelve Data ({asset_name}, {timeframe}) : {error}"
                     )
 
-        self.logger.info("Collecte Yahoo Finance terminée.")
+        self.logger.info("Collecte Twelve Data terminée.")
 
 
-def collect_yahoo_market_data() -> None:
-    collector = YahooMarketCollector()
+def collect_twelvedata_market_data() -> None:
+    collector = TwelveDataMarketCollector()
     collector.collect()
 
 
-# Alias pour garder compatibilité avec ton pipeline actuel
-def collect_market_data() -> None:
-    collect_yahoo_market_data()
-
-
 if __name__ == "__main__":
-    collect_yahoo_market_data()
+    collect_twelvedata_market_data()

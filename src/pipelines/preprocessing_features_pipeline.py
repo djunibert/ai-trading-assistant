@@ -18,7 +18,7 @@ Projet : AI Trading System
 
 from src.preprocessing.clean_market_data import clean_market_data
 from src.preprocessing.clean_macro_data import clean_macro_data
-
+from src.feature_engineering.target_features import build_binary_target
 from src.feature_engineering.technical_indicators import build_market_features
 from src.feature_engineering.macro_features import build_macro_features
 from src.feature_engineering.build_dataset import build_dataset_v1

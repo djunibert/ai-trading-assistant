@@ -3,16 +3,16 @@ __pycache__/
 *.pyc
 
 .env
-
 mlruns/
 
-data/raw/
+data/raw/**
 data/processed/
 data/features/
-data/final/
+data/final/**
+
+!data/raw/**/*.dvc
+!data/final/**/*.dvc
 
 .ipynb_checkpoints/
-
 .vscode/
-
 setup_git_push.ps1

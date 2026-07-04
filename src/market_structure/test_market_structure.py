@@ -16,6 +16,7 @@ df = BOSDetector().detect(df)
 df = CHOCHDetector().detect(df)
 df = EqualHighLowDetector(tolerance=0.001).detect(df)
 df = LiquidityDetector().detect(df)
+df = FairValueGapDetector().detect(df)
 
 columns = [
     "datetime",
@@ -41,6 +42,11 @@ columns = [
     "sell_side_sweep",
     "liquidity_sweep_direction",
     "liquidity_sweep_strength",
+    "fvg",
+    "fvg_direction",
+    "fvg_top",
+    "fvg_bottom",
+    "fvg_size"
 ]
 
 print(df[columns].tail(60))
@@ -56,6 +62,8 @@ print(f"CHOCH Bearish : {df['choch_bearish'].sum()}")
 print(f"Equal High : {df['equal_high'].sum()}")
 print(f"Equal Low  : {df['equal_low'].sum()}")
 print(f"Buy-side Sweep  : {df['buy_side_sweep'].sum()}")
-print(f"Sell-side Sweep : {df['sell_side_sweep'].sum()}")
+print(f"Sell-side Sweep : {df['sell_side_sweep'].sum
+print(f"FVG Bullish : {df['fvg_bullish'].sum()}")
+print(f"FVG Bearish : {df['fvg_bearish'].sum()}")
 
 print("\nTest terminé avec succès.")

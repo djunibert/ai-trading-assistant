@@ -67,7 +67,7 @@ columns = [
     "order_block_top",
     "order_block_bottom",
     "order_block_size",
-    
+
     "support_price",
     "resistance_price",
     "distance_to_support",
@@ -76,7 +76,7 @@ columns = [
     "resistance_broken",
     "near_support",
     "near_resistance",
-    
+
     "equilibrium_price",
     "premium_zone",
     "discount_zone",
@@ -102,6 +102,11 @@ print(f"Bullish FVG         : {df['fvg_bullish'].sum()}")
 print(f"Bearish FVG         : {df['fvg_bearish'].sum()}")
 print(f"Bullish Order Block : {(df['order_block'] == 1).sum()}")
 print(f"Bearish Order Block : {(df['order_block'] == -1).sum()}")
+print(f"Near Support        : {df['near_support'].sum()}")
+print(f"Near Resistance     : {df['near_resistance'].sum()}")
+print(f"Premium Zone        : {df['premium_zone'].sum()}")
+print(f"Discount Zone       : {df['discount_zone'].sum()}")
+print(f"Equilibrium Zone    : {df['equilibrium_zone'].sum()}")
 print("=" * 70)
 
 print("\nTest terminé avec succès.")

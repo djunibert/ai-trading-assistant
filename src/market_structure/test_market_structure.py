@@ -8,6 +8,7 @@ from src.market_structure.equal_high_low_detector import EqualHighLowDetector
 from src.market_structure.liquidity_detector import LiquidityDetector
 from src.market_structure.fair_value_gap_detector import FairValueGapDetector
 from src.market_structure.order_block_detector import OrderBlockDetector
+from src.market_structure.support_resistance_detector import SupportResistanceDetector
 
 
 df = pd.read_csv("data/features/market_macro/1h/gold.csv")
@@ -20,6 +21,7 @@ df = EqualHighLowDetector(tolerance=0.001).detect(df)
 df = LiquidityDetector().detect(df)
 df = FairValueGapDetector().detect(df)
 df = OrderBlockDetector(lookback=5).detect(df)
+df = SupportResistanceDetector().detect(df)
 
 columns = [
     "datetime",
@@ -63,6 +65,14 @@ columns = [
     "order_block_top",
     "order_block_bottom",
     "order_block_size",
+    "support_price",
+    "resistance_price",
+    "distance_to_support",
+    "distance_to_resistance",
+    "support_broken",
+    "resistance_broken",
+    "near_support",
+    "near_resistance"
 ]
 
 print(df[columns].tail(80))

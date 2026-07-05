@@ -69,6 +69,7 @@ class BOSEngine:
             df["bos_price"]
             .where(df["bos_v2"] != 0)
             .ffill()
+            .infer_objects(copy=False)
         )
 
         df["distance_to_bos"] = df["close"] - df["last_bos_price"]

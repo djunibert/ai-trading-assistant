@@ -50,6 +50,11 @@ class TrendDetector:
             "trend"
         ] = -1
 
-        df["trend"] = df["trend"].replace(0, pd.NA).ffill().fillna(0)
+        #df["trend"] = df["trend"].replace(0, pd.NA).ffill().fillna(0)
+        df["trend"] = (df["trend"]
+        .replace(0, pd.NA)
+        .ffill()
+        .infer_objects(copy=False)
+        .fillna(0))
 
         return df

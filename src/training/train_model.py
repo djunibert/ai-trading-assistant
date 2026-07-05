@@ -1,14 +1,26 @@
 """
 Module : train_model.py
 
-Entraîne un modèle Random Forest V1 avec MLflowManager.
+Entraîne un modèle Random Forest V1 avec une target à 3 classes :
+
+0 = SELL
+1 = NO_TRADE
+2 = BUY
 """
+
+import json
+from pathlib import Path
 
 import joblib
 import pandas as pd
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score, classification_report
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    classification_report,
+    confusion_matrix,
+)
 from sklearn.model_selection import train_test_split
 
 from src.mlops.mlflow_manager import MLflowManager
@@ -52,6 +64,9 @@ def train_random_forest_v1() -> None:
 
     df = df.dropna(subset=features + ["target"])
 
+    logger.info("Distribution de la target :")
+    logger.info(f"\n{df['target'].value_counts().sort_index()}")
+
     X = df[features]
     y = df["target"]
 
@@ -59,27 +74,31 @@ def train_random_forest_v1() -> None:
         X,
         y,
         test_size=0.2,
-        shuffle=False
+        shuffle=False,
     )
 
     model = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=8,
+        n_estimators=300,
+        max_depth=12,
+        min_samples_leaf=5,
         random_state=42,
-        class_weight="balanced"
+        class_weight="balanced_subsample",
+        n_jobs=-1,
     )
 
     mlflow_manager = MLflowManager(
         experiment_name="AI Trading System V1"
     )
 
-    with mlflow_manager.start_run(run_name="random_forest_v1"):
-
+    with mlflow_manager.start_run(run_name="random_forest_v1_multiclass"):
         mlflow_manager.log_params({
             "model": "RandomForestClassifier",
-            "n_estimators": 100,
-            "max_depth": 8,
+            "n_estimators": 300,
+            "max_depth": 12,
+            "min_samples_leaf": 5,
+            "class_weight": "balanced_subsample",
             "features": ",".join(features),
+            "target": "0=SELL,1=NO_TRADE,2=BUY",
         })
 
         logger.info("Entraînement du modèle...")
@@ -88,19 +107,41 @@ def train_random_forest_v1() -> None:
         y_pred = model.predict(X_test)
 
         accuracy = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
+        f1_macro = f1_score(y_test, y_pred, average="macro")
+        f1_weighted = f1_score(y_test, y_pred, average="weighted")
 
         logger.info(f"Accuracy : {accuracy}")
-        logger.info(f"F1-score : {f1}")
+        logger.info(f"F1 macro : {f1_macro}")
+        logger.info(f"F1 weighted : {f1_weighted}")
 
-        print(classification_report(y_test, y_pred))
+        report = classification_report(
+            y_test,
+            y_pred,
+            output_dict=True,
+            zero_division=0,
+        )
+
+        print(
+            classification_report(
+                y_test,
+                y_pred,
+                zero_division=0,
+            )
+        )
+
+        cm = confusion_matrix(y_test, y_pred)
+
+        logger.info("Matrice de confusion :")
+        logger.info(f"\n{cm}")
 
         mlflow_manager.log_metrics({
             "accuracy": accuracy,
-            "f1_score": f1,
+            "f1_macro": f1_macro,
+            "f1_weighted": f1_weighted,
         })
 
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        Path("reports").mkdir(exist_ok=True)
 
         model_file = MODELS_DIR / "random_forest_v1.pkl"
 
@@ -108,13 +149,27 @@ def train_random_forest_v1() -> None:
             {
                 "model": model,
                 "features": features,
+                "target_mapping": {
+                    0: "SELL",
+                    1: "NO_TRADE",
+                    2: "BUY",
+                },
             },
-            model_file
+            model_file,
+        )
+
+        with open("reports/classification_report.json", "w") as file:
+            json.dump(report, file, indent=4)
+
+        pd.DataFrame(cm).to_csv(
+            "reports/confusion_matrix.csv",
+            index=False,
+            encoding="utf-8-sig",
         )
 
         mlflow_manager.log_sklearn_model(
             model=model,
-            model_name="random_forest_v1"
+            model_name="random_forest_v1",
         )
 
         logger.info(f"Modèle sauvegardé : {model_file}")

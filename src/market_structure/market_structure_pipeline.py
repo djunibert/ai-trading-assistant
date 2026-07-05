@@ -1,11 +1,16 @@
 """
-Pipeline complet du Market Structure Engine.
-
-Ce pipeline orchestre tous les détecteurs et engines
-dans le bon ordre.
+Market Structure Pipeline
 """
 
+from __future__ import annotations
+
 import pandas as pd
+
+from src.config.market_structure_config import (
+    SWING_WINDOW,
+    EQUAL_HIGH_LOW_ATR_MULTIPLIER,
+    ORDER_BLOCK_LOOKBACK,
+)
 
 from src.market_structure.swing_detector import SwingDetector
 from src.market_structure.trend_detector import TrendDetector
@@ -24,45 +29,56 @@ from src.market_structure.order_block_lifecycle_engine import OrderBlockLifecycl
 from src.market_structure.support_resistance_detector import SupportResistanceDetector
 from src.market_structure.premium_discount_detector import PremiumDiscountDetector
 from src.market_structure.session_detector import SessionDetector
+from src.market_structure.market_structure_score_engine import MarketStructureScoreEngine
 
 
 class MarketStructurePipeline:
     """
-    Exécute tout le moteur de Market Structure.
+    Exécute tous les détecteurs dans le bon ordre.
     """
 
     def __init__(self):
-        self.detectors = [
-            SwingDetector(window=2),
+        self.engines = [
+            SwingDetector(window=SWING_WINDOW),
             TrendDetector(),
 
             BOSDetector(),
             BOSEngine(),
 
             CHOCHDetector(),
+            CHOCHEngine(),
 
-            EqualHighLowDetector(tolerance=0.001),
+            EqualHighLowDetector(
+                atr_multiplier=EQUAL_HIGH_LOW_ATR_MULTIPLIER
+            ),
+
             LiquidityPoolEngine(),
             LiquidityDetector(),
-
-            CHOCHEngine(),
 
             FairValueGapDetector(),
             FairValueGapEngine(),
 
-            OrderBlockDetector(lookback=5),
-            OrderBlockEngine(lookback=5),
+            OrderBlockDetector(
+                lookback=ORDER_BLOCK_LOOKBACK
+            ),
+
+            OrderBlockEngine(
+                lookback=ORDER_BLOCK_LOOKBACK
+            ),
+
             OrderBlockLifecycleEngine(),
 
             SupportResistanceDetector(),
-            PremiumDiscountDetector(equilibrium_tolerance=0.001),
+            PremiumDiscountDetector(),
+
             SessionDetector(),
+            MarketStructureScoreEngine(),
         ]
 
     def run(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
 
-        for detector in self.detectors:
-            df = detector.detect(df)
+        for engine in self.engines:
+            df = engine.detect(df)
 
         return df

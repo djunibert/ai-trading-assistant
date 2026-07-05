@@ -1,152 +1,187 @@
 """
-Test complet du Market Structure Engine.
+Liquidity Pool Engine
+
+Détecte et suit les zones de liquidité.
+
+Auteur : Junior Hébert
+Projet : AI Trading System
 """
+
+from __future__ import annotations
 
 import pandas as pd
 
-from src.market_structure.swing_detector import SwingDetector
-from src.market_structure.trend_detector import TrendDetector
-from src.market_structure.bos_detector import BOSDetector
-from src.market_structure.bos_engine import BOSEngine
-from src.market_structure.choch_detector import CHOCHDetector
-from src.market_structure.choch_engine import CHOCHEngine
-from src.market_structure.equal_high_low_detector import EqualHighLowDetector
-from src.market_structure.liquidity_pool_engine import LiquidityPoolEngine
-from src.market_structure.liquidity_detector import LiquidityDetector
-from src.market_structure.fair_value_gap_detector import FairValueGapDetector
-from src.market_structure.fair_value_gap_engine import FairValueGapEngine
-from src.market_structure.order_block_detector import OrderBlockDetector
-from src.market_structure.order_block_engine import OrderBlockEngine
-from src.market_structure.order_block_lifecycle_engine import OrderBlockLifecycleEngine
-from src.market_structure.support_resistance_detector import SupportResistanceDetector
-from src.market_structure.premium_discount_detector import PremiumDiscountDetector
-from src.market_structure.session_detector import SessionDetector
+from src.market_structure.models.liquidity_pool import LiquidityPool
 
 
-# Charger les données Gold 1H
-df = pd.read_csv("data/features/market_macro/1h/gold.csv")
+class LiquidityPoolEngine:
+    """
+    Détecte les Buy Side et Sell Side Liquidity Pools.
 
-# Exécuter les détecteurs dans le bon ordre
-df = SwingDetector(window=2).detect(df)
-df = TrendDetector().detect(df)
+    Les pools sont créés à partir des Equal High / Equal Low.
+    """
 
-df = BOSDetector().detect(df)
-df = BOSEngine().detect(df)
+    def __init__(self):
+        self.active_pool: LiquidityPool | None = None
 
-df = CHOCHDetector().detect(df)
+    def detect(self, df: pd.DataFrame) -> pd.DataFrame:
 
-df = EqualHighLowDetector(tolerance=0.001).detect(df)
-df = LiquidityPoolEngine().detect(df)
-df = LiquidityDetector().detect(df)
+        df = df.copy()
 
-df = CHOCHEngine().detect(df)
+        # ==========================================================
+        # Colonnes créées
+        # ==========================================================
 
-df = FairValueGapDetector().detect(df)
-df = FairValueGapEngine().detect(df)
+        df["liquidity_pool_direction"] = "NONE"
+        df["liquidity_pool_price"] = 0.0
+        df["liquidity_pool_strength"] = 0
+        df["liquidity_pool_age"] = 0
+        df["liquidity_pool_distance"] = 0.0
+        df["liquidity_pool_swept"] = False
+        df["liquidity_pool_active"] = False
+        df["liquidity_pool_score"] = 0.0
 
-df = OrderBlockDetector(lookback=5).detect(df)
-df = OrderBlockEngine(lookback=5).detect(df)
-df = OrderBlockLifecycleEngine().detect(df)
+        self.active_pool = None
 
-df = SupportResistanceDetector().detect(df)
-df = PremiumDiscountDetector(equilibrium_tolerance=0.001).detect(df)
-df = SessionDetector().detect(df)
+        # ==========================================================
+        # Parcours des bougies
+        # ==========================================================
 
+        for i in range(len(df)):
 
-columns = [
-    "datetime",
-    "close",
+            # ------------------------------------------------------
+            # Création Buy Side Liquidity
+            # ------------------------------------------------------
 
-    # Trend / BOS / CHOCH
-    "trend",
-    "bos_v2",
-    "bos_v2_direction",
-    "bos_strength_atr",
-    "bos_score",
-    "choch_v2",
-    "choch_v2_direction",
-    "choch_score",
+            if bool(df.loc[i, "equal_high"]):
 
-    # Equal High / Low
-    "equal_high",
-    "equal_low",
+                self.active_pool = LiquidityPool(
+                    direction="BUY_SIDE",
+                    price=float(df.loc[i, "last_swing_high"]),
+                    created_index=i,
+                    strength=2,
+                )
 
-    # Liquidity Pool
-    "liquidity_pool_direction",
-    "liquidity_pool_price",
-    "liquidity_pool_strength",
-    "liquidity_pool_age",
-    "liquidity_pool_distance",
-    "liquidity_pool_swept",
-    "liquidity_pool_active",
-    "liquidity_pool_score",
+            # ------------------------------------------------------
+            # Création Sell Side Liquidity
+            # ------------------------------------------------------
 
-    # Liquidity Sweep
-    "liquidity_sweep",
-    "buy_side_sweep",
-    "sell_side_sweep",
+            elif bool(df.loc[i, "equal_low"]):
 
-    # FVG
-    "fvg",
-    "fvg_direction",
-    "fvg_v2_active",
-    "fvg_v2_fill_percent",
-    "fvg_v2_score",
+                self.active_pool = LiquidityPool(
+                    direction="SELL_SIDE",
+                    price=float(df.loc[i, "last_swing_low"]),
+                    created_index=i,
+                    strength=2,
+                )
 
-    # Order Block
-    "ob_v2",
-    "ob_v2_direction",
-    "ob_v2_score",
-    "ob_lifecycle_active",
-    "ob_lifecycle_age",
-    "ob_lifecycle_touch_count",
-    "ob_lifecycle_retested",
-    "ob_lifecycle_mitigated",
-    "ob_lifecycle_invalidated",
-    "ob_lifecycle_score",
+            # ------------------------------------------------------
+            # Aucun pool actif
+            # ------------------------------------------------------
 
-    # Support / Resistance
-    "support_price",
-    "resistance_price",
+            if self.active_pool is None:
+                continue
 
-    # Premium / Discount
-    "premium_zone",
-    "discount_zone",
+            if not self.active_pool.active:
+                continue
 
-    # Session
-    "session",
-]
+            # ------------------------------------------------------
+            # Mise à jour
+            # ------------------------------------------------------
 
-print(df[columns].tail(100))
+            self.active_pool.age = i - self.active_pool.created_index
 
-print("\nSUMMARY")
-print("=" * 80)
-print(f"Swing High                 : {df['is_swing_high'].sum()}")
-print(f"Swing Low                  : {df['is_swing_low'].sum()}")
+            high = float(df.loc[i, "high"])
+            low = float(df.loc[i, "low"])
+            close = float(df.loc[i, "close"])
 
-print(f"BOS V2 total               : {(df['bos_v2'] != 0).sum()}")
-print(f"BOS V2 score max           : {df['bos_score'].max():.2f}")
+            # ------------------------------------------------------
+            # Buy Side
+            # ------------------------------------------------------
 
-print(f"CHOCH V2 total             : {(df['choch_v2'] != 0).sum()}")
-print(f"CHOCH V2 score max         : {df['choch_score'].max():.2f}")
+            if self.active_pool.direction == "BUY_SIDE":
 
-print(f"Liquidity Pool active      : {df['liquidity_pool_active'].sum()}")
-print(f"Liquidity Pool swept       : {df['liquidity_pool_swept'].sum()}")
-print(f"Liquidity Pool score max   : {df['liquidity_pool_score'].max():.2f}")
+                self.active_pool.swept = (
+                    high > self.active_pool.price
+                    and close < self.active_pool.price
+                )
 
-print(f"Buy Side Sweep             : {df['buy_side_sweep'].sum()}")
-print(f"Sell Side Sweep            : {df['sell_side_sweep'].sum()}")
+                distance = self.active_pool.price - close
 
-print(f"FVG total                  : {(df['fvg'] != 0).sum()}")
-print(f"FVG V2 active              : {df['fvg_v2_active'].sum()}")
-print(f"FVG V2 score max           : {df['fvg_v2_score'].max():.2f}")
+            # ------------------------------------------------------
+            # Sell Side
+            # ------------------------------------------------------
 
-print(f"Order Block V2 total       : {(df['ob_v2'] != 0).sum()}")
-print(f"OB Lifecycle active        : {df['ob_lifecycle_active'].sum()}")
-print(f"OB Lifecycle retested      : {df['ob_lifecycle_retested'].sum()}")
-print(f"OB Lifecycle mitigated     : {df['ob_lifecycle_mitigated'].sum()}")
-print(f"OB Lifecycle invalidated   : {df['ob_lifecycle_invalidated'].sum()}")
-print(f"OB Lifecycle score max     : {df['ob_lifecycle_score'].max():.2f}")
-print("=" * 80)
+            else:
 
-print("\nTest terminé avec succès.")
+                self.active_pool.swept = (
+                    low < self.active_pool.price
+                    and close > self.active_pool.price
+                )
+
+                distance = close - self.active_pool.price
+
+            # ------------------------------------------------------
+            # Si sweep alors le pool devient inactif
+            # ------------------------------------------------------
+
+            if self.active_pool.swept:
+                self.active_pool.active = False
+
+            # ------------------------------------------------------
+            # Calcul du score
+            # ------------------------------------------------------
+
+            score = 0
+
+            if self.active_pool.active:
+                score += 25
+
+            if self.active_pool.strength >= 2:
+                score += 25
+
+            if self.active_pool.age <= 20:
+                score += 25
+
+            if not self.active_pool.swept:
+                score += 25
+
+            self.active_pool.score = score
+
+            # ------------------------------------------------------
+            # Sauvegarde dans le DataFrame
+            # ------------------------------------------------------
+
+            df.loc[i, "liquidity_pool_direction"] = (
+                self.active_pool.direction
+            )
+
+            df.loc[i, "liquidity_pool_price"] = (
+                self.active_pool.price
+            )
+
+            df.loc[i, "liquidity_pool_strength"] = (
+                self.active_pool.strength
+            )
+
+            df.loc[i, "liquidity_pool_age"] = (
+                self.active_pool.age
+            )
+
+            df.loc[i, "liquidity_pool_distance"] = (
+                distance
+            )
+
+            df.loc[i, "liquidity_pool_swept"] = (
+                self.active_pool.swept
+            )
+
+            df.loc[i, "liquidity_pool_active"] = (
+                self.active_pool.active
+            )
+
+            df.loc[i, "liquidity_pool_score"] = (
+                self.active_pool.score
+            )
+
+        return df

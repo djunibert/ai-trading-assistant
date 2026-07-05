@@ -1,25 +1,11 @@
 """
-Détection Premium / Discount.
-
-Basé sur le dernier swing high et le dernier swing low.
-
-Premium :
-    close > midpoint
-
-Discount :
-    close < midpoint
-
-Equilibrium :
-    close proche du midpoint
+Premium / Discount Detector
 """
 
 import pandas as pd
 
 
 class PremiumDiscountDetector:
-    def __init__(self, equilibrium_tolerance: float = 0.001):
-        self.equilibrium_tolerance = equilibrium_tolerance
-
     def detect(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
 
@@ -39,7 +25,7 @@ class PremiumDiscountDetector:
 
         df["equilibrium_zone"] = (
             df["distance_to_equilibrium"].abs()
-            / df["equilibrium_price"]
-        ) <= self.equilibrium_tolerance
+            <= df["atr_14"] * 0.10
+        )
 
         return df

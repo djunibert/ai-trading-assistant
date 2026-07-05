@@ -1,22 +1,26 @@
 """
-Détection des Equal High et Equal Low.
+Equal High / Equal Low Detector
 
-Equal High :
-    deux swing highs proches selon une tolérance
-
-Equal Low :
-    deux swing lows proches selon une tolérance
+Détection adaptative basée sur l'ATR.
 """
+
+from __future__ import annotations
 
 import pandas as pd
 
 
 class EqualHighLowDetector:
-    def __init__(self, tolerance: float = 0.001):
-        """
-        tolerance = 0.001 signifie 0.1%
-        """
-        self.tolerance = tolerance
+    """
+    Détecte les Equal High et Equal Low.
+
+    La tolérance n'est pas fixe.
+    Elle est calculée avec l'ATR :
+
+        tolerance = ATR × atr_multiplier
+    """
+
+    def __init__(self, atr_multiplier: float):
+        self.atr_multiplier = atr_multiplier
 
     def detect(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -24,41 +28,41 @@ class EqualHighLowDetector:
         df["equal_high"] = False
         df["equal_low"] = False
 
-        previous_swing_high = (
-            df["last_swing_high"]
-            .where(df["is_swing_high"])
-            .shift(1)
-            .ffill()
-        )
+        required_columns = [
+            "is_swing_high",
+            "is_swing_low",
+            "high",
+            "low",
+            "atr_14",
+        ]
 
-        previous_swing_low = (
-            df["last_swing_low"]
-            .where(df["is_swing_low"])
-            .shift(1)
-            .ffill()
-        )
+        for col in required_columns:
+            if col not in df.columns:
+                raise ValueError(f"Colonne manquante : {col}")
 
-        high_diff_pct = (
-            (df["last_swing_high"] - previous_swing_high).abs()
-            / previous_swing_high
-        )
+        last_swing_high = None
+        last_swing_low = None
 
-        low_diff_pct = (
-            (df["last_swing_low"] - previous_swing_low).abs()
-            / previous_swing_low
-        )
+        for i in range(len(df)):
+            atr = float(df.loc[i, "atr_14"])
+            tolerance = atr * self.atr_multiplier
 
-        df.loc[
-            df["is_swing_high"] & (high_diff_pct <= self.tolerance),
-            "equal_high",
-        ] = True
+            if bool(df.loc[i, "is_swing_high"]):
+                current_high = float(df.loc[i, "high"])
 
-        df.loc[
-            df["is_swing_low"] & (low_diff_pct <= self.tolerance),
-            "equal_low",
-        ] = True
+                if last_swing_high is not None:
+                    if abs(current_high - last_swing_high) <= tolerance:
+                        df.loc[i, "equal_high"] = True
 
-        df["liquidity_above"] = df["equal_high"]
-        df["liquidity_below"] = df["equal_low"]
+                last_swing_high = current_high
+
+            if bool(df.loc[i, "is_swing_low"]):
+                current_low = float(df.loc[i, "low"])
+
+                if last_swing_low is not None:
+                    if abs(current_low - last_swing_low) <= tolerance:
+                        df.loc[i, "equal_low"] = True
+
+                last_swing_low = current_low
 
         return df

@@ -2,16 +2,13 @@ import pandas as pd
 
 from src.pipelines.market_structure_pipeline import MarketStructurePipeline
 from src.backtesting.backtesting_engine import BacktestingEngine
+from src.backtesting.report_generator import BacktestReportGenerator
 from src.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
 
 DATA_PATH = "data/features/market_macro/1h/gold.csv"
-
-TRADES_OUTPUT = "reports/backtesting_trades.csv"
-STATS_OUTPUT = "reports/backtesting_statistics.csv"
-EQUITY_OUTPUT = "reports/backtesting_equity_curve.csv"
 
 
 def main() -> None:
@@ -43,29 +40,19 @@ def main() -> None:
     logger.info(f"Expectancy : {statistics['expectancy']}")
     logger.info(f"Max drawdown : {statistics['max_drawdown']}")
 
+    report_generator = BacktestReportGenerator(
+        output_dir="reports"
+    )
+
+    report_generator.save(
+        statistics=statistics,
+        trades_df=trades_df,
+        equity_curve=equity_curve,
+    )
+
+    logger.info("Rapports sauvegardés dans le dossier reports.")
+
     if not trades_df.empty:
-        trades_df.to_csv(
-            TRADES_OUTPUT,
-            index=False,
-            encoding="utf-8-sig",
-        )
-
-        pd.DataFrame([statistics]).to_csv(
-            STATS_OUTPUT,
-            index=False,
-            encoding="utf-8-sig",
-        )
-
-        equity_curve.to_csv(
-            EQUITY_OUTPUT,
-            index=False,
-            encoding="utf-8-sig",
-        )
-
-        logger.info(f"Trades sauvegardés : {TRADES_OUTPUT}")
-        logger.info(f"Statistiques sauvegardées : {STATS_OUTPUT}")
-        logger.info(f"Courbe de capital sauvegardée : {EQUITY_OUTPUT}")
-
         print(trades_df.tail(20))
         print(equity_curve.tail(20))
     else:

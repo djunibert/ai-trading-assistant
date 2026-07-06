@@ -1,0 +1,12 @@
+{
+    "total_trades": 3,
+    "wins": 1,
+    "losses": 2,
+    "win_rate": 33.33,
+    "total_pnl": -30.8,
+    "profit_factor": 0.52,
+    "expectancy": -10.27,
+    "max_drawdown": -58.1,
+    "average_win": 34.0,
+    "average_loss": -32.4
+}

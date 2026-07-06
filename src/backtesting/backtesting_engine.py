@@ -1,94 +1,99 @@
 """
-Backtesting Engine V1.
+Backtesting Engine V2.
 
-Simule les trades à partir des colonnes :
-- risk_trade_allowed
-- risk_signal
-- risk_entry_price
-- sl_price
-- tp_price
+Simule les trades et calcule :
+- statistiques
+- historique des trades
+- courbe de capital
 """
+
+from dataclasses import asdict
 
 import pandas as pd
 
+from src.backtesting.trade import Trade
+from src.backtesting.statistics import BacktestStatistics
+from src.backtesting.equity_curve import EquityCurve
+
 
 class BacktestingEngine:
+    def __init__(self, initial_capital: float = 100000.0):
+        self.initial_capital = initial_capital
+
     def run(self, df: pd.DataFrame) -> dict:
         trades = []
 
-        for i in range(len(df) - 1):
-            row = df.iloc[i]
+        for entry_index in range(len(df) - 1):
+            row = df.iloc[entry_index]
 
-            if not row["risk_trade_allowed"]:
+            if not bool(row["risk_trade_allowed"]):
                 continue
 
-            signal = row["risk_signal"]
-            entry = row["risk_entry_price"]
-            sl = row["sl_price"]
-            tp = row["tp_price"]
+            trade = Trade(
+                entry_datetime=str(row["datetime"]),
+                signal=str(row["risk_signal"]),
+                entry_price=float(row["risk_entry_price"]),
+                stop_loss=float(row["sl_price"]),
+                take_profit=float(row["tp_price"]),
+            )
 
-            future = df.iloc[i + 1:]
+            future_df = df.iloc[entry_index + 1:]
 
-            result = "OPEN"
-            pnl = 0.0
+            for duration, (_, future_row) in enumerate(future_df.iterrows(), start=1):
+                high = float(future_row["high"])
+                low = float(future_row["low"])
 
-            for _, future_row in future.iterrows():
-                high = future_row["high"]
-                low = future_row["low"]
-
-                if signal == "BUY":
-                    if low <= sl:
-                        result = "LOSS"
-                        pnl = sl - entry
+                if trade.signal == "BUY":
+                    if low <= trade.stop_loss:
+                        trade.close_trade(
+                            str(future_row["datetime"]),
+                            trade.stop_loss,
+                            "LOSS",
+                            duration,
+                        )
                         break
 
-                    if high >= tp:
-                        result = "WIN"
-                        pnl = tp - entry
+                    if high >= trade.take_profit:
+                        trade.close_trade(
+                            str(future_row["datetime"]),
+                            trade.take_profit,
+                            "WIN",
+                            duration,
+                        )
                         break
 
-                if signal == "SELL":
-                    if high >= sl:
-                        result = "LOSS"
-                        pnl = entry - sl
+                elif trade.signal == "SELL":
+                    if high >= trade.stop_loss:
+                        trade.close_trade(
+                            str(future_row["datetime"]),
+                            trade.stop_loss,
+                            "LOSS",
+                            duration,
+                        )
                         break
 
-                    if low <= tp:
-                        result = "WIN"
-                        pnl = entry - tp
+                    if low <= trade.take_profit:
+                        trade.close_trade(
+                            str(future_row["datetime"]),
+                            trade.take_profit,
+                            "WIN",
+                            duration,
+                        )
                         break
 
-            trades.append({
-                "datetime": row["datetime"],
-                "signal": signal,
-                "entry": entry,
-                "stop_loss": sl,
-                "take_profit": tp,
-                "result": result,
-                "pnl": pnl,
-            })
+            trades.append(asdict(trade))
 
         trades_df = pd.DataFrame(trades)
 
-        if trades_df.empty:
-            return {
-                "total_trades": 0,
-                "wins": 0,
-                "losses": 0,
-                "win_rate": 0,
-                "total_pnl": 0,
-                "trades": trades_df,
-            }
+        statistics = BacktestStatistics().calculate(trades_df)
 
-        wins = (trades_df["result"] == "WIN").sum()
-        losses = (trades_df["result"] == "LOSS").sum()
-        total_trades = len(trades_df)
+        equity_curve = EquityCurve().build(
+            trades_df=trades_df,
+            initial_capital=self.initial_capital,
+        )
 
         return {
-            "total_trades": total_trades,
-            "wins": wins,
-            "losses": losses,
-            "win_rate": round((wins / total_trades) * 100, 2),
-            "total_pnl": round(trades_df["pnl"].sum(), 2),
+            "statistics": statistics,
             "trades": trades_df,
+            "equity_curve": equity_curve,
         }

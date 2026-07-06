@@ -8,8 +8,10 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DATA_PATH = "data/features/market_macro/1h/gold.csv"
+
 TRADES_OUTPUT = "reports/backtesting_trades.csv"
 STATS_OUTPUT = "reports/backtesting_statistics.csv"
+EQUITY_OUTPUT = "reports/backtesting_equity_curve.csv"
 
 
 def main() -> None:
@@ -24,10 +26,13 @@ def main() -> None:
 
     logger.info("Pipeline Market Structure exécuté.")
 
-    result = BacktestingEngine().run(df)
+    result = BacktestingEngine(
+        initial_capital=100000.0
+    ).run(df)
 
     statistics = result["statistics"]
     trades_df = result["trades"]
+    equity_curve = result["equity_curve"]
 
     logger.info(f"Total trades : {statistics['total_trades']}")
     logger.info(f"Wins : {statistics['wins']}")
@@ -39,17 +44,30 @@ def main() -> None:
     logger.info(f"Max drawdown : {statistics['max_drawdown']}")
 
     if not trades_df.empty:
-        trades_df.to_csv(TRADES_OUTPUT, index=False, encoding="utf-8-sig")
+        trades_df.to_csv(
+            TRADES_OUTPUT,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
         pd.DataFrame([statistics]).to_csv(
             STATS_OUTPUT,
             index=False,
-            encoding="utf-8-sig"
+            encoding="utf-8-sig",
+        )
+
+        equity_curve.to_csv(
+            EQUITY_OUTPUT,
+            index=False,
+            encoding="utf-8-sig",
         )
 
         logger.info(f"Trades sauvegardés : {TRADES_OUTPUT}")
         logger.info(f"Statistiques sauvegardées : {STATS_OUTPUT}")
+        logger.info(f"Courbe de capital sauvegardée : {EQUITY_OUTPUT}")
 
         print(trades_df.tail(20))
+        print(equity_curve.tail(20))
     else:
         logger.warning("Aucun trade généré.")
 

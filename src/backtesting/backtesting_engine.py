@@ -3,6 +3,7 @@ Backtesting Engine V2.
 
 Simule les trades et calcule :
 - statistiques
+- métriques avancées
 - historique des trades
 - courbe de capital
 """
@@ -14,6 +15,7 @@ import pandas as pd
 from src.backtesting.trade import Trade
 from src.backtesting.statistics import BacktestStatistics
 from src.backtesting.equity_curve import EquityCurve
+from src.backtesting.performance_metrics import PerformanceMetrics
 
 
 class BacktestingEngine:
@@ -39,7 +41,10 @@ class BacktestingEngine:
 
             future_df = df.iloc[entry_index + 1:]
 
-            for duration, (_, future_row) in enumerate(future_df.iterrows(), start=1):
+            for duration, (_, future_row) in enumerate(
+                future_df.iterrows(),
+                start=1,
+            ):
                 high = float(future_row["high"])
                 low = float(future_row["low"])
 
@@ -86,6 +91,9 @@ class BacktestingEngine:
         trades_df = pd.DataFrame(trades)
 
         statistics = BacktestStatistics().calculate(trades_df)
+        performance = PerformanceMetrics().calculate(trades_df)
+
+        statistics.update(performance)
 
         equity_curve = EquityCurve().build(
             trades_df=trades_df,

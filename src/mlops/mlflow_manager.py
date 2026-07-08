@@ -11,7 +11,7 @@ Ce fichier centralise toute la logique MLflow :
 
 import mlflow
 import mlflow.sklearn
-
+import mlflow.xgboost
 
 class MLflowManager:
     def __init__(self, experiment_name: str):
@@ -32,5 +32,12 @@ class MLflowManager:
     def log_sklearn_model(self, model, artifact_name: str) -> None:
         mlflow.sklearn.log_model(
             sk_model=model,
+            name=artifact_name,
+        )
+        
+        
+    def log_xgboost_model(self, model, artifact_name: str) -> None:
+        mlflow.xgboost.log_model(
+            xgb_model=model,
             name=artifact_name,
         )

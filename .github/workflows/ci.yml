@@ -1,0 +1,71 @@
+name: CI Python
+
+on:
+  push:
+    branches:
+      - main
+      - architecture-v2
+
+  pull_request:
+    branches:
+      - main
+      - architecture-v2
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualite-et-tests:
+    name: Qualité et tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # Récupère le code du dépôt.
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      # Installe Python et active le cache pip.
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      # Met à jour pip.
+      - name: Mettre à jour pip
+        run: |
+          python -m pip install --upgrade pip
+
+      # Installe les dépendances du projet.
+      - name: Installer les dépendances
+        run: |
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      # Vérifie que tous les fichiers Python sont valides.
+      - name: Vérifier la syntaxe Python
+        run: |
+          python -m compileall src tests backend
+
+      # Vérifie les erreurs importantes de qualité.
+      - name: Vérifier le code avec Ruff
+        run: |
+          ruff check src tests backend --output-format=github
+
+      # Vérifie que les principaux modules peuvent être importés.
+      - name: Vérifier les imports principaux
+        run: |
+          python -c "from src.pipelines.market_structure_pipeline import MarketStructurePipeline; print('MarketStructurePipeline OK')"
+          python -c "from src.backtesting.backtesting_engine import BacktestingEngine; print('BacktestingEngine OK')"
+          python -c "from src.data.data_splitter import DataSplitter; print('DataSplitter OK')"
+          python -c "from src.mlops.mlflow_manager import MLflowManager; print('MLflowManager OK')"
+
+      # Exécute les tests unitaires.
+      # Les tests qui nécessitent les gros datasets seront séparés plus tard.
+      - name: Exécuter les tests unitaires
+        run: |
+          pytest -q

@@ -17,3 +17,10 @@ data/final/**
 .vscode/
 setup_git_push.ps1
 models/
+
+# Modèles et artefacts ML
+models/
+*.pkl
+*.joblib
+*.keras
+mlruns/

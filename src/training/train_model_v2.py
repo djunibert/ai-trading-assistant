@@ -1,14 +1,10 @@
 """
 Training Random Forest V2.
 
-Ce fichier entraîne le modèle ML V2 à partir de :
+Ce fichier entraîne le modèle Random Forest V2 avec :
 - dataset_ml_v2.csv
-- features Market Structure
-- features Trade Setup
-- target BUY / SELL / NO_TRADE
-
-La gestion MLflow est séparée dans :
-src/mlops/mlflow_manager.py
+- DataSplitter centralisé
+- MLflow séparé dans mlops/mlflow_manager.py
 """
 
 from pathlib import Path
@@ -18,8 +14,8 @@ import pandas as pd
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score, classification_report
-from sklearn.model_selection import train_test_split
 
+from src.data.data_splitter import DataSplitter
 from src.mlops.mlflow_manager import MLflowManager
 from src.utils.logger import get_logger
 
@@ -41,28 +37,29 @@ def train_model_v2() -> None:
     if "target" not in df.columns:
         raise ValueError("La colonne target est manquante.")
 
-    columns_to_drop = [
-        "target",
-        "future_return_1",
-    ]
+    # ==========================================================
+    # MISE À JOUR IMPORTANTE
+    # ==========================================================
+    # Avant, le split était fait directement dans ce fichier avec :
+    # train_test_split(X, y, ...)
+    #
+    # Maintenant, on utilise DataSplitter.
+    # Cela permet à Random Forest, XGBoost et les futurs modèles
+    # d'utiliser exactement la même logique de séparation.
+    # ==========================================================
 
-    X = df.drop(
-        columns=[col for col in columns_to_drop if col in df.columns],
-        errors="ignore",
+    X_train, X_test, y_train, y_test = DataSplitter().split(
+        df=df,
+        target_column="target",
+        columns_to_drop=["future_return_1"],
     )
 
-    y = df["target"]
+    logger.info(f"X_train : {X_train.shape}")
+    logger.info(f"X_test  : {X_test.shape}")
+    logger.info(f"y_train : {y_train.shape}")
+    logger.info(f"y_test  : {y_test.shape}")
 
-    logger.info(f"Nombre de features : {X.shape[1]}")
-    logger.info(f"Distribution target :\n{y.value_counts()}")
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.20,
-        random_state=42,
-        stratify=y,
-    )
+    logger.info(f"Distribution target train :\n{y_train.value_counts()}")
 
     model = RandomForestClassifier(
         n_estimators=300,
@@ -104,7 +101,11 @@ def train_model_v2() -> None:
             "min_samples_leaf": 2,
             "class_weight": "balanced",
             "dataset": str(DATASET_PATH),
-            "features_count": X.shape[1],
+            "features_count": X_train.shape[1],
+            "splitter": "DataSplitter",
+            "test_size": 0.20,
+            "random_state": 42,
+            "stratify": True,
         })
 
         mlflow_manager.log_metrics({
@@ -123,13 +124,13 @@ def train_model_v2() -> None:
         joblib.dump(
             {
                 "model": model,
-                "features": X.columns.tolist(),
+                "features": X_train.columns.tolist(),
             },
             MODEL_PATH,
         )
 
         logger.info(f"Modèle sauvegardé : {MODEL_PATH}")
-        logger.info("Training V2 terminé avec succès.")
+        logger.info("Training Random Forest V2 terminé avec succès.")
 
 
 if __name__ == "__main__":

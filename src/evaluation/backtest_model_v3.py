@@ -4,33 +4,21 @@ Backtest des modèles V3 par symbole et timeframe.
 Modèles pris en charge :
 - Random Forest
 - XGBoost
+- LSTM
 
-Exemples PowerShell :
+Exemples :
 
-python -m src.evaluation.backtest_model_v3 `
-    --symbol GC `
-    --timeframe 5m `
-    --model random_forest
+python -m src.evaluation.backtest_model_v3 --symbol GC --timeframe 5m --model random_forest
 
-python -m src.evaluation.backtest_model_v3 `
-    --symbol GC `
-    --timeframe 15m `
-    --model xgboost
+python -m src.evaluation.backtest_model_v3 --symbol GC --timeframe 5m --model xgboost
 
-Principe du backtest :
-
-SELL     = -1
-NO_TRADE = 0
-BUY      = 1
-
-Rendement de la stratégie :
-
-prediction * future_return_1
+python -m src.evaluation.backtest_model_v3 --symbol GC --timeframe 15m --model lstm
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
@@ -38,19 +26,20 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from tensorflow.keras.models import load_model
 
+from src.training.base_trainer import BaseTrainer
 from src.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
 
 
-# ==========================================================
-# Configuration
-# ==========================================================
-
 RANDOM_STATE = 42
 TEST_SIZE = 0.20
+
+LSTM_TRAIN_RATIO = 0.70
+LSTM_VALIDATION_RATIO = 0.15
 
 VALID_TIMEFRAMES = {
     "1m",
@@ -65,42 +54,15 @@ VALID_TIMEFRAMES = {
 VALID_MODELS = {
     "random_forest",
     "xgboost",
+    "lstm",
 }
-
-
-# ==========================================================
-# Chemins
-# ==========================================================
-
-def get_ml_dataset_path(
-    symbol: str,
-    timeframe: str,
-) -> Path:
-    """
-    Retourne le chemin du dataset numérique utilisé
-    pour entraîner le modèle.
-    """
-
-    return (
-        Path("data/final/ml")
-        / symbol
-        / f"dataset_ml_v3_{symbol}_{timeframe}.csv"
-    )
 
 
 def get_analysis_dataset_path(
     symbol: str,
     timeframe: str,
 ) -> Path:
-    """
-    Retourne le chemin du dataset d'analyse.
-
-    Ce dataset contient notamment :
-    - datetime
-    - future_return_1
-    - symbol
-    - timeframe
-    """
+    """Retourne le chemin du dataset Analysis V3."""
 
     return (
         Path("data/final/analysis")
@@ -109,32 +71,55 @@ def get_analysis_dataset_path(
     )
 
 
+def get_ml_dataset_path(
+    symbol: str,
+    timeframe: str,
+) -> Path:
+    """Retourne le chemin du dataset ML V3."""
+
+    return (
+        Path("data/final/ml")
+        / symbol
+        / f"dataset_ml_v3_{symbol}_{timeframe}.csv"
+    )
+
+
+def get_model_directory(
+    symbol: str,
+    timeframe: str,
+    model_name: str,
+) -> Path:
+    """Retourne le dossier du modèle."""
+
+    return (
+        Path("models")
+        / symbol
+        / timeframe
+        / model_name
+    )
+
+
 def get_model_path(
     symbol: str,
     timeframe: str,
     model_name: str,
 ) -> Path:
-    """
-    Retourne le chemin du modèle demandé.
-    """
+    """Retourne le chemin du modèle."""
+
+    model_directory = get_model_directory(
+        symbol=symbol,
+        timeframe=timeframe,
+        model_name=model_name,
+    )
 
     if model_name == "random_forest":
-        return (
-            Path("models")
-            / symbol
-            / timeframe
-            / "random_forest"
-            / "random_forest_v3.pkl"
-        )
+        return model_directory / "random_forest_v3.pkl"
 
     if model_name == "xgboost":
-        return (
-            Path("models")
-            / symbol
-            / timeframe
-            / "xgboost"
-            / "xgboost_v3.pkl"
-        )
+        return model_directory / "xgboost_v3.pkl"
+
+    if model_name == "lstm":
+        return model_directory / "lstm_v3.keras"
 
     raise ValueError(
         f"Modèle non pris en charge : {model_name}"
@@ -146,9 +131,7 @@ def get_output_directory(
     timeframe: str,
     model_name: str,
 ) -> Path:
-    """
-    Retourne le dossier des rapports du backtest.
-    """
+    """Retourne le dossier des rapports."""
 
     return (
         Path("reports/model_backtesting")
@@ -158,101 +141,177 @@ def get_output_directory(
     )
 
 
-# ==========================================================
-# Chargement des données
-# ==========================================================
-
-def load_datasets(
+def load_analysis_dataset(
     symbol: str,
     timeframe: str,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Charge les datasets ML et Analysis.
-    """
+) -> pd.DataFrame:
+    """Charge le dataset Analysis."""
 
-    ml_path = get_ml_dataset_path(
+    dataset_path = get_analysis_dataset_path(
         symbol=symbol,
         timeframe=timeframe,
     )
 
-    analysis_path = get_analysis_dataset_path(
-        symbol=symbol,
-        timeframe=timeframe,
+    if not dataset_path.exists():
+        raise FileNotFoundError(
+            f"Dataset Analysis introuvable : {dataset_path}"
+        )
+
+    logger.info(
+        f"Chargement du dataset Analysis : {dataset_path}"
     )
 
-    if not ml_path.exists():
-        raise FileNotFoundError(
-            f"Dataset ML introuvable : {ml_path}"
-        )
+    df = pd.read_csv(dataset_path)
 
-    if not analysis_path.exists():
-        raise FileNotFoundError(
-            f"Dataset Analysis introuvable : {analysis_path}"
-        )
+    required_columns = {
+        "target",
+        "future_return_1",
+    }
 
-    logger.info(f"Dataset ML : {ml_path}")
-    logger.info(f"Dataset Analysis : {analysis_path}")
-
-    ml_df = pd.read_csv(ml_path)
-    analysis_df = pd.read_csv(analysis_path)
-
-    validate_datasets(
-        ml_df=ml_df,
-        analysis_df=analysis_df,
+    missing_columns = required_columns.difference(
+        df.columns
     )
 
-    return ml_df, analysis_df
-
-
-def validate_datasets(
-    ml_df: pd.DataFrame,
-    analysis_df: pd.DataFrame,
-) -> None:
-    """
-    Vérifie la cohérence des datasets.
-    """
-
-    if "target" not in ml_df.columns:
+    if missing_columns:
         raise ValueError(
-            "La colonne target est absente du dataset ML."
+            f"Colonnes manquantes : {missing_columns}"
         )
 
-    if "future_return_1" not in analysis_df.columns:
-        raise ValueError(
-            "La colonne future_return_1 est absente "
-            "du dataset Analysis."
-        )
-
-    if len(ml_df) != len(analysis_df):
-        raise ValueError(
-            "Les datasets ML et Analysis n'ont pas "
-            "le même nombre de lignes. "
-            f"ML={len(ml_df)}, Analysis={len(analysis_df)}"
-        )
-
-    if "datetime" in analysis_df.columns:
-        analysis_df["datetime"] = pd.to_datetime(
-            analysis_df["datetime"],
+    if "datetime" in df.columns:
+        df["datetime"] = pd.to_datetime(
+            df["datetime"],
             errors="coerce",
             utc=True,
         )
 
+    return df
 
-# ==========================================================
-# Jeu de test
-# ==========================================================
 
-def create_test_split(
+def load_ml_dataset(
+    symbol: str,
+    timeframe: str,
+) -> pd.DataFrame:
+    """Charge le dataset ML des modèles tabulaires."""
+
+    dataset_path = get_ml_dataset_path(
+        symbol=symbol,
+        timeframe=timeframe,
+    )
+
+    if not dataset_path.exists():
+        raise FileNotFoundError(
+            f"Dataset ML introuvable : {dataset_path}"
+        )
+
+    logger.info(
+        f"Chargement du dataset ML : {dataset_path}"
+    )
+
+    df = pd.read_csv(dataset_path)
+
+    if "target" not in df.columns:
+        raise ValueError(
+            "La colonne target est absente du dataset ML."
+        )
+
+    return df
+
+
+def load_tabular_model_bundle(
+    symbol: str,
+    timeframe: str,
+    model_name: str,
+) -> dict[str, Any]:
+    """Charge Random Forest ou XGBoost."""
+
+    model_path = get_model_path(
+        symbol=symbol,
+        timeframe=timeframe,
+        model_name=model_name,
+    )
+
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Modèle introuvable : {model_path}"
+        )
+
+    bundle = joblib.load(model_path)
+
+    if not isinstance(bundle, dict):
+        raise TypeError(
+            "Le fichier modèle doit contenir un dictionnaire."
+        )
+
+    if "model" not in bundle or "features" not in bundle:
+        raise ValueError(
+            "Le bundle doit contenir model et features."
+        )
+
+    return bundle
+
+
+def load_lstm_bundle(
+    symbol: str,
+    timeframe: str,
+) -> dict[str, Any]:
+    """Charge le modèle LSTM, le scaler et les features."""
+
+    model_directory = get_model_directory(
+        symbol=symbol,
+        timeframe=timeframe,
+        model_name="lstm",
+    )
+
+    model_path = model_directory / "lstm_v3.keras"
+    scaler_path = model_directory / "scaler_v3.pkl"
+    features_path = model_directory / "features_v3.pkl"
+    metadata_path = model_directory / "metadata_v3.json"
+
+    required_paths = [
+        model_path,
+        scaler_path,
+        features_path,
+    ]
+
+    missing_paths = [
+        path
+        for path in required_paths
+        if not path.exists()
+    ]
+
+    if missing_paths:
+        raise FileNotFoundError(
+            f"Fichiers LSTM manquants : {missing_paths}"
+        )
+
+    sequence_length = 32
+
+    if metadata_path.exists():
+        metadata = json.loads(
+            metadata_path.read_text(
+                encoding="utf-8"
+            )
+        )
+
+        sequence_length = int(
+            metadata.get(
+                "sequence_length",
+                sequence_length,
+            )
+        )
+
+    return {
+        "model": load_model(model_path),
+        "scaler": joblib.load(scaler_path),
+        "features": joblib.load(features_path),
+        "sequence_length": sequence_length,
+    }
+
+
+def create_tabular_test_data(
     ml_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Recrée exactement le même jeu de test que celui utilisé
-    pendant l'entraînement des modèles V3.
-
-    Important :
-    le random_state, test_size et stratify doivent rester
-    identiques aux scripts d'entraînement.
-    """
+    """Recrée le split utilisé par RF et XGBoost."""
 
     X = ml_df.drop(
         columns=[
@@ -275,68 +334,63 @@ def create_test_split(
     return X_test, y_test
 
 
-# ==========================================================
-# Chargement du modèle
-# ==========================================================
+def decode_xgboost_predictions(
+    predictions: np.ndarray,
+    inverse_mapping: dict | None,
+) -> np.ndarray:
+    """Convertit 0, 1, 2 vers -1, 0, 1."""
 
-def load_model_bundle(
+    mapping = inverse_mapping or {
+        0: -1,
+        1: 0,
+        2: 1,
+    }
+
+    decoded = pd.Series(
+        predictions
+    ).map(mapping)
+
+    if decoded.isna().any():
+        raise ValueError(
+            "Certaines prédictions XGBoost sont invalides."
+        )
+
+    return decoded.to_numpy(
+        dtype=int
+    )
+
+
+def predict_tabular_model(
     symbol: str,
     timeframe: str,
     model_name: str,
-) -> dict[str, Any]:
-    """
-    Charge le modèle et ses métadonnées.
-    """
+    analysis_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Produit le DataFrame de prédictions RF ou XGBoost."""
 
-    model_path = get_model_path(
+    ml_df = load_ml_dataset(
+        symbol=symbol,
+        timeframe=timeframe,
+    )
+
+    if len(ml_df) != len(analysis_df):
+        raise ValueError(
+            "Les datasets ML et Analysis "
+            "n'ont pas le même nombre de lignes."
+        )
+
+    X_test, y_test = create_tabular_test_data(
+        ml_df
+    )
+
+    bundle = load_tabular_model_bundle(
         symbol=symbol,
         timeframe=timeframe,
         model_name=model_name,
     )
 
-    if not model_path.exists():
-        raise FileNotFoundError(
-            f"Modèle introuvable : {model_path}"
-        )
-
-    logger.info(f"Chargement du modèle : {model_path}")
-
-    bundle = joblib.load(model_path)
-
-    if not isinstance(bundle, dict):
-        raise TypeError(
-            "Le fichier modèle doit contenir un dictionnaire."
-        )
-
-    required_keys = {
-        "model",
-        "features",
-    }
-
-    missing_keys = required_keys.difference(
-        bundle.keys()
-    )
-
-    if missing_keys:
-        raise ValueError(
-            f"Clés manquantes dans le modèle : {missing_keys}"
-        )
-
-    return bundle
-
-
-# ==========================================================
-# Prédictions
-# ==========================================================
-
-def prepare_model_features(
-    X_test: pd.DataFrame,
-    feature_names: list[str],
-) -> pd.DataFrame:
-    """
-    Place les features dans le même ordre que pendant
-    l'entraînement.
-    """
+    model = bundle["model"]
+    feature_names = bundle["features"]
 
     missing_features = [
         feature
@@ -346,84 +400,22 @@ def prepare_model_features(
 
     if missing_features:
         raise ValueError(
-            "Features manquantes dans le dataset : "
-            f"{missing_features}"
+            f"Features manquantes : {missing_features}"
         )
 
-    return X_test[feature_names].copy()
+    X_model = X_test[feature_names]
 
-
-def predict_classes(
-    model_name: str,
-    bundle: dict[str, Any],
-    X_test: pd.DataFrame,
-) -> np.ndarray:
-    """
-    Produit des prédictions dans le format commun :
-
-    SELL     = -1
-    NO_TRADE = 0
-    BUY      = 1
-    """
-
-    model = bundle["model"]
-
-    raw_predictions = model.predict(
-        X_test
+    predictions = model.predict(
+        X_model
     )
-
-    if model_name == "random_forest":
-        return np.asarray(
-            raw_predictions,
-            dtype=int,
-        )
 
     if model_name == "xgboost":
-        inverse_mapping = bundle.get(
-            "inverse_target_mapping",
-            {
-                0: -1,
-                1: 0,
-                2: 1,
-            },
+        predictions = decode_xgboost_predictions(
+            predictions=predictions,
+            inverse_mapping=bundle.get(
+                "inverse_target_mapping"
+            ),
         )
-
-        decoded_predictions = pd.Series(
-            raw_predictions,
-            index=X_test.index,
-        ).map(inverse_mapping)
-
-        if decoded_predictions.isna().any():
-            raise ValueError(
-                "Certaines prédictions XGBoost ne peuvent "
-                "pas être reconverties."
-            )
-
-        return decoded_predictions.to_numpy(
-            dtype=int
-        )
-
-    raise ValueError(
-        f"Modèle non pris en charge : {model_name}"
-    )
-
-
-# ==========================================================
-# Construction des résultats
-# ==========================================================
-
-def build_backtest_dataframe(
-    analysis_df: pd.DataFrame,
-    X_test: pd.DataFrame,
-    y_test: pd.Series,
-    predictions: np.ndarray,
-) -> pd.DataFrame:
-    """
-    Construit le DataFrame de backtest.
-
-    Les indices de X_test permettent de retrouver exactement
-    les mêmes lignes dans le dataset Analysis.
-    """
 
     selected_analysis = analysis_df.loc[
         X_test.index
@@ -441,7 +433,6 @@ def build_backtest_dataframe(
     if "close" in selected_analysis.columns:
         result_df["close"] = (
             selected_analysis["close"]
-            .astype(float)
         )
 
     result_df["actual_target"] = (
@@ -456,14 +447,242 @@ def build_backtest_dataframe(
         .astype(float)
     )
 
-    # BUY :
-    # +1 × rendement futur
-    #
-    # SELL :
-    # -1 × rendement futur
-    #
-    # NO_TRADE :
-    # 0 × rendement futur
+    return result_df
+
+
+def encode_lstm_target(
+    values: np.ndarray,
+) -> np.ndarray:
+    """Encode -1, 0, 1 vers 0, 1, 2."""
+
+    mapping = {
+        -1: 0,
+        0: 1,
+        1: 2,
+    }
+
+    return np.asarray(
+        [
+            mapping[int(value)]
+            for value in values
+        ],
+        dtype=np.int32,
+    )
+
+
+def decode_lstm_target(
+    values: np.ndarray,
+) -> np.ndarray:
+    """Décode 0, 1, 2 vers -1, 0, 1."""
+
+    mapping = {
+        0: -1,
+        1: 0,
+        2: 1,
+    }
+
+    return np.asarray(
+        [
+            mapping[int(value)]
+            for value in values
+        ],
+        dtype=np.int32,
+    )
+
+
+def create_lstm_sequences(
+    X: np.ndarray,
+    y: np.ndarray,
+    source_indices: np.ndarray,
+    sequence_length: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Construit les séquences LSTM."""
+
+    X_sequences = []
+    y_sequences = []
+    sequence_indices = []
+
+    for index in range(
+        sequence_length,
+        len(X),
+    ):
+        X_sequences.append(
+            X[index - sequence_length:index]
+        )
+
+        y_sequences.append(
+            y[index]
+        )
+
+        sequence_indices.append(
+            source_indices[index]
+        )
+
+    return (
+        np.asarray(
+            X_sequences,
+            dtype=np.float32,
+        ),
+        np.asarray(
+            y_sequences,
+            dtype=np.int32,
+        ),
+        np.asarray(
+            sequence_indices,
+            dtype=int,
+        ),
+    )
+
+
+def predict_lstm_model(
+    symbol: str,
+    timeframe: str,
+    analysis_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Produit les prédictions LSTM sur le test chronologique."""
+
+    trainer = BaseTrainer(
+        symbol=symbol,
+        timeframe=timeframe,
+        model_name="lstm",
+    )
+
+    X_df, y_series = trainer.prepare_tabular_features(
+        analysis_df
+    )
+
+    bundle = load_lstm_bundle(
+        symbol=symbol,
+        timeframe=timeframe,
+    )
+
+    model = bundle["model"]
+    scaler = bundle["scaler"]
+    feature_names = bundle["features"]
+    sequence_length = bundle["sequence_length"]
+
+    missing_features = [
+        feature
+        for feature in feature_names
+        if feature not in X_df.columns
+    ]
+
+    if missing_features:
+        raise ValueError(
+            f"Features LSTM manquantes : {missing_features}"
+        )
+
+    X_df = X_df[feature_names]
+
+    X = X_df.to_numpy(
+        dtype=np.float32
+    )
+
+    y = encode_lstm_target(
+        y_series.to_numpy()
+    )
+
+    source_indices = np.arange(
+        len(analysis_df)
+    )
+
+    total_rows = len(X)
+
+    train_end = int(
+        total_rows * LSTM_TRAIN_RATIO
+    )
+
+    validation_end = int(
+        total_rows
+        * (
+            LSTM_TRAIN_RATIO
+            + LSTM_VALIDATION_RATIO
+        )
+    )
+
+    X_test_raw = X[validation_end:]
+    y_test_raw = y[validation_end:]
+    test_indices = source_indices[
+        validation_end:
+    ]
+
+    X_test_scaled = scaler.transform(
+        X_test_raw
+    )
+
+    (
+        X_test,
+        y_test,
+        sequence_indices,
+    ) = create_lstm_sequences(
+        X=X_test_scaled,
+        y=y_test_raw,
+        source_indices=test_indices,
+        sequence_length=sequence_length,
+    )
+
+    probabilities = model.predict(
+        X_test,
+        verbose=0,
+    )
+
+    predictions_encoded = np.argmax(
+        probabilities,
+        axis=1,
+    )
+
+    predictions = decode_lstm_target(
+        predictions_encoded
+    )
+
+    actual_targets = decode_lstm_target(
+        y_test
+    )
+
+    selected_analysis = analysis_df.iloc[
+        sequence_indices
+    ].copy()
+
+    result_df = pd.DataFrame(
+        index=sequence_indices
+    )
+
+    if "datetime" in selected_analysis.columns:
+        result_df["datetime"] = (
+            selected_analysis["datetime"]
+            .to_numpy()
+        )
+
+    if "close" in selected_analysis.columns:
+        result_df["close"] = (
+            selected_analysis["close"]
+            .to_numpy()
+        )
+
+    result_df["actual_target"] = (
+        actual_targets
+    )
+
+    result_df["prediction"] = (
+        predictions
+    )
+
+    result_df["future_return"] = (
+        selected_analysis["future_return_1"]
+        .astype(float)
+        .to_numpy()
+    )
+
+    return result_df
+
+
+def complete_backtest_dataframe(
+    result_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Ajoute les rendements et résultats du backtest."""
+
+    result_df = result_df.copy()
+
     result_df["strategy_return"] = (
         result_df["prediction"]
         * result_df["future_return"]
@@ -482,19 +701,39 @@ def build_backtest_dataframe(
         result_df["strategy_return"] > 0
     )
 
-    return result_df.sort_index()
+    return result_df
 
 
-# ==========================================================
-# Métriques
-# ==========================================================
+def empty_metrics() -> dict[str, Any]:
+    """Retourne des métriques vides."""
+
+    return {
+        "total_observations": 0,
+        "total_trades": 0,
+        "buy_trades": 0,
+        "sell_trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "breakeven": 0,
+        "win_rate_percent": 0.0,
+        "signal_accuracy_percent": 0.0,
+        "gross_profit": 0.0,
+        "gross_loss": 0.0,
+        "net_return_sum": 0.0,
+        "compounded_return": 0.0,
+        "profit_factor": 0.0,
+        "expectancy": 0.0,
+        "average_win": 0.0,
+        "average_loss": 0.0,
+        "max_drawdown": 0.0,
+        "sharpe_ratio": 0.0,
+    }
+
 
 def calculate_backtest_metrics(
     result_df: pd.DataFrame,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
-    """
-    Calcule les métriques principales de trading.
-    """
+    """Calcule les principales métriques de trading."""
 
     trades_df = result_df[
         result_df["trade_taken"]
@@ -539,31 +778,35 @@ def calculate_backtest_metrics(
         )
     )
 
-    net_return_sum = float(
-        trades_df["strategy_return"].sum()
+    profit_factor = (
+        gross_profit / gross_loss
+        if gross_loss > 0
+        else 0.0
     )
 
     expectancy = float(
         trades_df["strategy_return"].mean()
     )
 
-    average_win = float(
-        trades_df.loc[
-            trades_df["strategy_return"] > 0,
-            "strategy_return",
-        ].mean()
-    ) if wins > 0 else 0.0
+    average_win = (
+        float(
+            trades_df.loc[
+                trades_df["strategy_return"] > 0,
+                "strategy_return",
+            ].mean()
+        )
+        if wins > 0
+        else 0.0
+    )
 
-    average_loss = float(
-        trades_df.loc[
-            trades_df["strategy_return"] < 0,
-            "strategy_return",
-        ].mean()
-    ) if losses > 0 else 0.0
-
-    profit_factor = (
-        gross_profit / gross_loss
-        if gross_loss > 0
+    average_loss = (
+        float(
+            trades_df.loc[
+                trades_df["strategy_return"] < 0,
+                "strategy_return",
+            ].mean()
+        )
+        if losses > 0
         else 0.0
     )
 
@@ -604,40 +847,31 @@ def calculate_backtest_metrics(
         else 0.0
     )
 
-    win_rate = (
-        wins / total_trades * 100
-        if total_trades > 0
-        else 0.0
-    )
-
-    signal_accuracy = float(
-        result_df["is_correct"].mean()
-        * 100
-    )
-
-    buy_trades = int(
-        (
-            trades_df["prediction"] == 1
-        ).sum()
-    )
-
-    sell_trades = int(
-        (
-            trades_df["prediction"] == -1
-        ).sum()
-    )
-
     metrics = {
-        "total_observations": int(len(result_df)),
+        "total_observations": int(
+            len(result_df)
+        ),
         "total_trades": int(total_trades),
-        "buy_trades": buy_trades,
-        "sell_trades": sell_trades,
+        "buy_trades": int(
+            (
+                trades_df["prediction"] == 1
+            ).sum()
+        ),
+        "sell_trades": int(
+            (
+                trades_df["prediction"] == -1
+            ).sum()
+        ),
         "wins": wins,
         "losses": losses,
         "breakeven": breakeven,
-        "win_rate_percent": round(win_rate, 2),
+        "win_rate_percent": round(
+            wins / total_trades * 100,
+            2,
+        ),
         "signal_accuracy_percent": round(
-            signal_accuracy,
+            result_df["is_correct"].mean()
+            * 100,
             2,
         ),
         "gross_profit": round(
@@ -649,7 +883,11 @@ def calculate_backtest_metrics(
             8,
         ),
         "net_return_sum": round(
-            net_return_sum,
+            float(
+                trades_df[
+                    "strategy_return"
+                ].sum()
+            ),
             8,
         ),
         "compounded_return": round(
@@ -685,38 +923,6 @@ def calculate_backtest_metrics(
     return metrics, trades_df
 
 
-def empty_metrics() -> dict[str, Any]:
-    """
-    Retourne des métriques vides.
-    """
-
-    return {
-        "total_observations": 0,
-        "total_trades": 0,
-        "buy_trades": 0,
-        "sell_trades": 0,
-        "wins": 0,
-        "losses": 0,
-        "breakeven": 0,
-        "win_rate_percent": 0.0,
-        "signal_accuracy_percent": 0.0,
-        "gross_profit": 0.0,
-        "gross_loss": 0.0,
-        "net_return_sum": 0.0,
-        "compounded_return": 0.0,
-        "profit_factor": 0.0,
-        "expectancy": 0.0,
-        "average_win": 0.0,
-        "average_loss": 0.0,
-        "max_drawdown": 0.0,
-        "sharpe_ratio": 0.0,
-    }
-
-
-# ==========================================================
-# Sauvegarde
-# ==========================================================
-
 def save_reports(
     symbol: str,
     timeframe: str,
@@ -725,12 +931,7 @@ def save_reports(
     result_df: pd.DataFrame,
     trades_df: pd.DataFrame,
 ) -> tuple[Path, Path, Path]:
-    """
-    Sauvegarde :
-    - les métriques
-    - toutes les prédictions
-    - seulement les trades
-    """
+    """Sauvegarde les rapports du backtest."""
 
     output_directory = get_output_directory(
         symbol=symbol,
@@ -785,19 +986,13 @@ def save_reports(
     )
 
 
-# ==========================================================
-# Affichage
-# ==========================================================
-
-def log_metrics(
+def log_backtest_metrics(
     symbol: str,
     timeframe: str,
     model_name: str,
     metrics: dict[str, Any],
 ) -> None:
-    """
-    Affiche les principales métriques.
-    """
+    """Affiche les métriques du backtest."""
 
     logger.info("=" * 70)
     logger.info("RÉSULTATS DU BACKTEST")
@@ -817,28 +1012,12 @@ def log_metrics(
     )
 
     logger.info(
-        f"BUY : {metrics['buy_trades']}"
-    )
-
-    logger.info(
-        f"SELL : {metrics['sell_trades']}"
-    )
-
-    logger.info(
-        f"Wins : {metrics['wins']}"
-    )
-
-    logger.info(
-        f"Losses : {metrics['losses']}"
-    )
-
-    logger.info(
         f"Win rate : "
         f"{metrics['win_rate_percent']} %"
     )
 
     logger.info(
-        f"Accuracy signaux : "
+        f"Accuracy : "
         f"{metrics['signal_accuracy_percent']} %"
     )
 
@@ -853,11 +1032,6 @@ def log_metrics(
     )
 
     logger.info(
-        f"Expectancy : "
-        f"{metrics['expectancy']}"
-    )
-
-    logger.info(
         f"Max drawdown : "
         f"{metrics['max_drawdown']}"
     )
@@ -868,18 +1042,12 @@ def log_metrics(
     )
 
 
-# ==========================================================
-# Pipeline principal
-# ==========================================================
-
 def backtest_model_v3(
     symbol: str,
     timeframe: str,
     model_name: str,
 ) -> dict[str, Any]:
-    """
-    Exécute le backtest complet.
-    """
+    """Exécute le backtest complet."""
 
     symbol = symbol.upper()
     timeframe = timeframe.lower()
@@ -895,39 +1063,28 @@ def backtest_model_v3(
             f"Modèle invalide : {model_name}"
         )
 
-    ml_df, analysis_df = load_datasets(
+    analysis_df = load_analysis_dataset(
         symbol=symbol,
         timeframe=timeframe,
     )
 
-    X_test, y_test = create_test_split(
-        ml_df=ml_df,
-    )
+    if model_name == "lstm":
+        result_df = predict_lstm_model(
+            symbol=symbol,
+            timeframe=timeframe,
+            analysis_df=analysis_df,
+        )
 
-    bundle = load_model_bundle(
-        symbol=symbol,
-        timeframe=timeframe,
-        model_name=model_name,
-    )
+    else:
+        result_df = predict_tabular_model(
+            symbol=symbol,
+            timeframe=timeframe,
+            model_name=model_name,
+            analysis_df=analysis_df,
+        )
 
-    feature_names = bundle["features"]
-
-    X_model = prepare_model_features(
-        X_test=X_test,
-        feature_names=feature_names,
-    )
-
-    predictions = predict_classes(
-        model_name=model_name,
-        bundle=bundle,
-        X_test=X_model,
-    )
-
-    result_df = build_backtest_dataframe(
-        analysis_df=analysis_df,
-        X_test=X_test,
-        y_test=y_test,
-        predictions=predictions,
+    result_df = complete_backtest_dataframe(
+        result_df
     )
 
     metrics, trades_df = calculate_backtest_metrics(
@@ -947,7 +1104,7 @@ def backtest_model_v3(
         trades_df=trades_df,
     )
 
-    log_metrics(
+    log_backtest_metrics(
         symbol=symbol,
         timeframe=timeframe,
         model_name=model_name,
@@ -973,14 +1130,8 @@ def backtest_model_v3(
     }
 
 
-# ==========================================================
-# Arguments PowerShell
-# ==========================================================
-
 def parse_arguments() -> argparse.Namespace:
-    """
-    Lit les paramètres de la ligne de commande.
-    """
+    """Lit les paramètres PowerShell."""
 
     parser = argparse.ArgumentParser(
         description=(
@@ -992,7 +1143,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--symbol",
         default="GC",
-        help="Symbole à tester. Valeur par défaut : GC.",
+        help="Symbole à tester.",
     )
 
     parser.add_argument(

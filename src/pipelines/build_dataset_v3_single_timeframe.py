@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import pandas as pd
+#import pandas as pd
 
 from src.database.services.dataset_builder_service import DatasetBuilderService
 from src.pipelines.build_dataset_v3_from_postgresql import (

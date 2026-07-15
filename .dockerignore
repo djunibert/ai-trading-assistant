@@ -1,0 +1,15 @@
+.git
+.github
+.dvc/cache
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+.env
+notebooks
+reports
+data
+models/*.pkl
+!models/random_forest_v1.pkl

@@ -1,10 +1,17 @@
 """
 Backtest des modèles V3 par symbole et timeframe.
 
-Modèles pris en charge :
+Modèles supportés :
 - Random Forest
 - XGBoost
 - LSTM
+
+Les modèles tabulaires utilisent le même découpage chronologique
+que pendant leur entraînement :
+
+- 70 % entraînement
+- 15 % validation
+- 15 % test
 
 Exemples :
 
@@ -25,9 +32,9 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import load_model
 
+from src.data.chronological_splitter import ChronologicalSplitter
 from src.training.base_trainer import BaseTrainer
 from src.utils.logger import get_logger
 
@@ -35,11 +42,8 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-RANDOM_STATE = 42
-TEST_SIZE = 0.20
-
-LSTM_TRAIN_RATIO = 0.70
-LSTM_VALIDATION_RATIO = 0.15
+TRAIN_RATIO = 0.70
+VALIDATION_RATIO = 0.15
 
 VALID_TIMEFRAMES = {
     "1m",
@@ -62,7 +66,9 @@ def get_analysis_dataset_path(
     symbol: str,
     timeframe: str,
 ) -> Path:
-    """Retourne le chemin du dataset Analysis V3."""
+    """
+    Retourne le chemin du dataset Analysis V3.
+    """
 
     return (
         Path("data/final/analysis")
@@ -75,7 +81,9 @@ def get_ml_dataset_path(
     symbol: str,
     timeframe: str,
 ) -> Path:
-    """Retourne le chemin du dataset ML V3."""
+    """
+    Retourne le chemin du dataset ML V3.
+    """
 
     return (
         Path("data/final/ml")
@@ -89,7 +97,9 @@ def get_model_directory(
     timeframe: str,
     model_name: str,
 ) -> Path:
-    """Retourne le dossier du modèle."""
+    """
+    Retourne le dossier du modèle.
+    """
 
     return (
         Path("models")
@@ -104,7 +114,9 @@ def get_model_path(
     timeframe: str,
     model_name: str,
 ) -> Path:
-    """Retourne le chemin du modèle."""
+    """
+    Retourne le fichier du modèle.
+    """
 
     model_directory = get_model_directory(
         symbol=symbol,
@@ -122,7 +134,7 @@ def get_model_path(
         return model_directory / "lstm_v3.keras"
 
     raise ValueError(
-        f"Modèle non pris en charge : {model_name}"
+        f"Modèle non supporté : {model_name}"
     )
 
 
@@ -131,7 +143,9 @@ def get_output_directory(
     timeframe: str,
     model_name: str,
 ) -> Path:
-    """Retourne le dossier des rapports."""
+    """
+    Retourne le dossier des rapports.
+    """
 
     return (
         Path("reports/model_backtesting")
@@ -145,7 +159,9 @@ def load_analysis_dataset(
     symbol: str,
     timeframe: str,
 ) -> pd.DataFrame:
-    """Charge le dataset Analysis."""
+    """
+    Charge le dataset Analysis V3.
+    """
 
     dataset_path = get_analysis_dataset_path(
         symbol=symbol,
@@ -191,7 +207,9 @@ def load_ml_dataset(
     symbol: str,
     timeframe: str,
 ) -> pd.DataFrame:
-    """Charge le dataset ML des modèles tabulaires."""
+    """
+    Charge le dataset ML utilisé par Random Forest et XGBoost.
+    """
 
     dataset_path = get_ml_dataset_path(
         symbol=symbol,
@@ -222,7 +240,9 @@ def load_tabular_model_bundle(
     timeframe: str,
     model_name: str,
 ) -> dict[str, Any]:
-    """Charge Random Forest ou XGBoost."""
+    """
+    Charge un bundle Random Forest ou XGBoost.
+    """
 
     model_path = get_model_path(
         symbol=symbol,
@@ -235,6 +255,10 @@ def load_tabular_model_bundle(
             f"Modèle introuvable : {model_path}"
         )
 
+    logger.info(
+        f"Chargement du modèle : {model_path}"
+    )
+
     bundle = joblib.load(model_path)
 
     if not isinstance(bundle, dict):
@@ -242,9 +266,18 @@ def load_tabular_model_bundle(
             "Le fichier modèle doit contenir un dictionnaire."
         )
 
-    if "model" not in bundle or "features" not in bundle:
+    required_keys = {
+        "model",
+        "features",
+    }
+
+    missing_keys = required_keys.difference(
+        bundle.keys()
+    )
+
+    if missing_keys:
         raise ValueError(
-            "Le bundle doit contenir model et features."
+            f"Clés manquantes dans le modèle : {missing_keys}"
         )
 
     return bundle
@@ -254,7 +287,9 @@ def load_lstm_bundle(
     symbol: str,
     timeframe: str,
 ) -> dict[str, Any]:
-    """Charge le modèle LSTM, le scaler et les features."""
+    """
+    Charge le modèle LSTM, le scaler et les features.
+    """
 
     model_directory = get_model_directory(
         symbol=symbol,
@@ -300,6 +335,10 @@ def load_lstm_bundle(
             )
         )
 
+    logger.info(
+        f"Chargement du modèle LSTM : {model_path}"
+    )
+
     return {
         "model": load_model(model_path),
         "scaler": joblib.load(scaler_path),
@@ -311,7 +350,10 @@ def load_lstm_bundle(
 def create_tabular_test_data(
     ml_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.Series]:
-    """Recrée le split utilisé par RF et XGBoost."""
+    """
+    Recrée le même découpage chronologique que celui utilisé
+    pendant l'entraînement de Random Forest et XGBoost.
+    """
 
     X = ml_df.drop(
         columns=[
@@ -323,22 +365,30 @@ def create_tabular_test_data(
 
     y = ml_df["target"].astype(int)
 
-    _, X_test, _, y_test = train_test_split(
-        X,
-        y,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-        stratify=y,
+    splitter = ChronologicalSplitter(
+        train_ratio=TRAIN_RATIO,
+        validation_ratio=VALIDATION_RATIO,
     )
 
-    return X_test, y_test
+    split = splitter.split(
+        X=X,
+        y=y,
+    )
+
+    return split.X_test, split.y_test
 
 
 def decode_xgboost_predictions(
     predictions: np.ndarray,
     inverse_mapping: dict | None,
 ) -> np.ndarray:
-    """Convertit 0, 1, 2 vers -1, 0, 1."""
+    """
+    Reconvertit les classes XGBoost :
+
+    0 vers SELL
+    1 vers NO_TRADE
+    2 vers BUY
+    """
 
     mapping = inverse_mapping or {
         0: -1,
@@ -366,7 +416,9 @@ def predict_tabular_model(
     model_name: str,
     analysis_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Produit le DataFrame de prédictions RF ou XGBoost."""
+    """
+    Produit les prédictions Random Forest ou XGBoost.
+    """
 
     ml_df = load_ml_dataset(
         symbol=symbol,
@@ -375,12 +427,12 @@ def predict_tabular_model(
 
     if len(ml_df) != len(analysis_df):
         raise ValueError(
-            "Les datasets ML et Analysis "
-            "n'ont pas le même nombre de lignes."
+            "Les datasets ML et Analysis n'ont pas "
+            "le même nombre de lignes."
         )
 
     X_test, y_test = create_tabular_test_data(
-        ml_df
+        ml_df=ml_df,
     )
 
     bundle = load_tabular_model_bundle(
@@ -403,7 +455,9 @@ def predict_tabular_model(
             f"Features manquantes : {missing_features}"
         )
 
-    X_model = X_test[feature_names]
+    X_model = X_test[
+        feature_names
+    ].copy()
 
     predictions = model.predict(
         X_model
@@ -433,6 +487,7 @@ def predict_tabular_model(
     if "close" in selected_analysis.columns:
         result_df["close"] = (
             selected_analysis["close"]
+            .astype(float)
         )
 
     result_df["actual_target"] = (
@@ -440,7 +495,9 @@ def predict_tabular_model(
         .astype(int)
     )
 
-    result_df["prediction"] = predictions
+    result_df["prediction"] = (
+        np.asarray(predictions, dtype=int)
+    )
 
     result_df["future_return"] = (
         selected_analysis["future_return_1"]
@@ -453,7 +510,9 @@ def predict_tabular_model(
 def encode_lstm_target(
     values: np.ndarray,
 ) -> np.ndarray:
-    """Encode -1, 0, 1 vers 0, 1, 2."""
+    """
+    Encode les classes du LSTM.
+    """
 
     mapping = {
         -1: 0,
@@ -473,7 +532,9 @@ def encode_lstm_target(
 def decode_lstm_target(
     values: np.ndarray,
 ) -> np.ndarray:
-    """Décode 0, 1, 2 vers -1, 0, 1."""
+    """
+    Décode les classes du LSTM.
+    """
 
     mapping = {
         0: -1,
@@ -496,7 +557,15 @@ def create_lstm_sequences(
     source_indices: np.ndarray,
     sequence_length: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Construit les séquences LSTM."""
+    """
+    Construit les séquences utilisées par le LSTM.
+    """
+
+    if len(X) <= sequence_length:
+        raise ValueError(
+            "Le jeu de test est trop petit pour créer "
+            "les séquences LSTM."
+        )
 
     X_sequences = []
     y_sequences = []
@@ -507,7 +576,9 @@ def create_lstm_sequences(
         len(X),
     ):
         X_sequences.append(
-            X[index - sequence_length:index]
+            X[
+                index - sequence_length:index
+            ]
         )
 
         y_sequences.append(
@@ -539,7 +610,10 @@ def predict_lstm_model(
     timeframe: str,
     analysis_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Produit les prédictions LSTM sur le test chronologique."""
+    """
+    Produit les prédictions LSTM sur les dernières 15 %
+    des données.
+    """
 
     trainer = BaseTrainer(
         symbol=symbol,
@@ -572,7 +646,9 @@ def predict_lstm_model(
             f"Features LSTM manquantes : {missing_features}"
         )
 
-    X_df = X_df[feature_names]
+    X_df = X_df[
+        feature_names
+    ].copy()
 
     X = X_df.to_numpy(
         dtype=np.float32
@@ -588,22 +664,24 @@ def predict_lstm_model(
 
     total_rows = len(X)
 
-    train_end = int(
-        total_rows * LSTM_TRAIN_RATIO
-    )
-
-    validation_end = int(
+    test_start = int(
         total_rows
         * (
-            LSTM_TRAIN_RATIO
-            + LSTM_VALIDATION_RATIO
+            TRAIN_RATIO
+            + VALIDATION_RATIO
         )
     )
 
-    X_test_raw = X[validation_end:]
-    y_test_raw = y[validation_end:]
+    X_test_raw = X[
+        test_start:
+    ]
+
+    y_test_raw = y[
+        test_start:
+    ]
+
     test_indices = source_indices[
-        validation_end:
+        test_start:
     ]
 
     X_test_scaled = scaler.transform(
@@ -656,6 +734,7 @@ def predict_lstm_model(
     if "close" in selected_analysis.columns:
         result_df["close"] = (
             selected_analysis["close"]
+            .astype(float)
             .to_numpy()
         )
 
@@ -679,7 +758,9 @@ def predict_lstm_model(
 def complete_backtest_dataframe(
     result_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Ajoute les rendements et résultats du backtest."""
+    """
+    Ajoute les résultats du backtest.
+    """
 
     result_df = result_df.copy()
 
@@ -705,7 +786,9 @@ def complete_backtest_dataframe(
 
 
 def empty_metrics() -> dict[str, Any]:
-    """Retourne des métriques vides."""
+    """
+    Retourne des métriques vides.
+    """
 
     return {
         "total_observations": 0,
@@ -733,16 +816,25 @@ def empty_metrics() -> dict[str, Any]:
 def calculate_backtest_metrics(
     result_df: pd.DataFrame,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
-    """Calcule les principales métriques de trading."""
+    """
+    Calcule les principales métriques de trading.
+    """
 
     trades_df = result_df[
         result_df["trade_taken"]
     ].copy()
 
     if trades_df.empty:
-        return empty_metrics(), trades_df
+        metrics = empty_metrics()
+        metrics["total_observations"] = len(
+            result_df
+        )
 
-    total_trades = len(trades_df)
+        return metrics, trades_df
+
+    total_trades = len(
+        trades_df
+    )
 
     wins = int(
         (
@@ -778,14 +870,16 @@ def calculate_backtest_metrics(
         )
     )
 
-    profit_factor = (
-        gross_profit / gross_loss
-        if gross_loss > 0
-        else 0.0
+    net_return_sum = float(
+        trades_df[
+            "strategy_return"
+        ].sum()
     )
 
     expectancy = float(
-        trades_df["strategy_return"].mean()
+        trades_df[
+            "strategy_return"
+        ].mean()
     )
 
     average_win = (
@@ -807,6 +901,12 @@ def calculate_backtest_metrics(
             ].mean()
         )
         if losses > 0
+        else 0.0
+    )
+
+    profit_factor = (
+        gross_profit / gross_loss
+        if gross_loss > 0
         else 0.0
     )
 
@@ -836,7 +936,9 @@ def calculate_backtest_metrics(
     )
 
     return_std = float(
-        trades_df["strategy_return"].std()
+        trades_df[
+            "strategy_return"
+        ].std()
     )
 
     sharpe_ratio = (
@@ -851,7 +953,9 @@ def calculate_backtest_metrics(
         "total_observations": int(
             len(result_df)
         ),
-        "total_trades": int(total_trades),
+        "total_trades": int(
+            total_trades
+        ),
         "buy_trades": int(
             (
                 trades_df["prediction"] == 1
@@ -883,11 +987,7 @@ def calculate_backtest_metrics(
             8,
         ),
         "net_return_sum": round(
-            float(
-                trades_df[
-                    "strategy_return"
-                ].sum()
-            ),
+            net_return_sum,
             8,
         ),
         "compounded_return": round(
@@ -931,7 +1031,9 @@ def save_reports(
     result_df: pd.DataFrame,
     trades_df: pd.DataFrame,
 ) -> tuple[Path, Path, Path]:
-    """Sauvegarde les rapports du backtest."""
+    """
+    Sauvegarde les métriques, prédictions et trades.
+    """
 
     output_directory = get_output_directory(
         symbol=symbol,
@@ -959,7 +1061,9 @@ def save_reports(
         / "backtest_trades.csv"
     )
 
-    pd.DataFrame([metrics]).to_csv(
+    pd.DataFrame(
+        [metrics]
+    ).to_csv(
         metrics_path,
         index=False,
         encoding="utf-8-sig",
@@ -992,15 +1096,25 @@ def log_backtest_metrics(
     model_name: str,
     metrics: dict[str, Any],
 ) -> None:
-    """Affiche les métriques du backtest."""
+    """
+    Affiche les métriques principales.
+    """
 
     logger.info("=" * 70)
     logger.info("RÉSULTATS DU BACKTEST")
     logger.info("=" * 70)
 
-    logger.info(f"Modèle : {model_name}")
-    logger.info(f"Symbole : {symbol}")
-    logger.info(f"Timeframe : {timeframe}")
+    logger.info(
+        f"Modèle : {model_name}"
+    )
+
+    logger.info(
+        f"Symbole : {symbol}"
+    )
+
+    logger.info(
+        f"Timeframe : {timeframe}"
+    )
 
     logger.info(
         f"Observations : "
@@ -1008,7 +1122,18 @@ def log_backtest_metrics(
     )
 
     logger.info(
-        f"Trades : {metrics['total_trades']}"
+        f"Trades : "
+        f"{metrics['total_trades']}"
+    )
+
+    logger.info(
+        f"BUY : "
+        f"{metrics['buy_trades']}"
+    )
+
+    logger.info(
+        f"SELL : "
+        f"{metrics['sell_trades']}"
     )
 
     logger.info(
@@ -1032,6 +1157,11 @@ def log_backtest_metrics(
     )
 
     logger.info(
+        f"Expectancy : "
+        f"{metrics['expectancy']}"
+    )
+
+    logger.info(
         f"Max drawdown : "
         f"{metrics['max_drawdown']}"
     )
@@ -1047,7 +1177,9 @@ def backtest_model_v3(
     timeframe: str,
     model_name: str,
 ) -> dict[str, Any]:
-    """Exécute le backtest complet."""
+    """
+    Exécute le backtest complet.
+    """
 
     symbol = symbol.upper()
     timeframe = timeframe.lower()
@@ -1084,7 +1216,7 @@ def backtest_model_v3(
         )
 
     result_df = complete_backtest_dataframe(
-        result_df
+        result_df=result_df,
     )
 
     metrics, trades_df = calculate_backtest_metrics(
@@ -1131,12 +1263,14 @@ def backtest_model_v3(
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Lit les paramètres PowerShell."""
+    """
+    Lit les arguments PowerShell.
+    """
 
     parser = argparse.ArgumentParser(
         description=(
             "Backtester un modèle V3 "
-            "pour un symbole et un timeframe."
+            "avec un split chronologique."
         )
     )
 
@@ -1149,14 +1283,18 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--timeframe",
         required=True,
-        choices=sorted(VALID_TIMEFRAMES),
+        choices=sorted(
+            VALID_TIMEFRAMES
+        ),
         help="Timeframe à tester.",
     )
 
     parser.add_argument(
         "--model",
         required=True,
-        choices=sorted(VALID_MODELS),
+        choices=sorted(
+            VALID_MODELS
+        ),
         help="Modèle à tester.",
     )
 

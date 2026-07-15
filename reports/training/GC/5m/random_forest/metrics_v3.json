@@ -1,0 +1,8 @@
+{
+    "validation_accuracy": 0.6752136752136753,
+    "validation_f1_macro": 0.4973591346231991,
+    "validation_f1_weighted": 0.69332818415631,
+    "test_accuracy": 0.7468770545693623,
+    "test_f1_macro": 0.45253897457489,
+    "test_f1_weighted": 0.7461706393986017
+}

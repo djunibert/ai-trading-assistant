@@ -1,34 +1,30 @@
 """
-Entraînement Random Forest V3 par symbole et timeframe.
+Entraînement XGBoost V3 avec découpage chronologique.
 
-Le script utilise :
-- dataset_analysis_v3
-- BaseTrainer
-- ChronologicalSplitter
-- MLflow
-- sauvegarde du modèle et des métadonnées
+Répartition :
+- 70 % entraînement
+- 15 % validation
+- 15 % test
 
 Exemples :
 
-python -m src.training.train_random_forest_v3 --symbol GC --timeframe 5m
-
-python -m src.training.train_random_forest_v3 --symbol GC --timeframe 15m
+python -m src.training.train_xgboost_v3 --symbol GC --timeframe 5m
+python -m src.training.train_xgboost_v3 --symbol GC --timeframe 15m
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-#from pathlib import Path
 
 import joblib
-#import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
     f1_score,
 )
+from xgboost import XGBClassifier
 
 from src.data.chronological_splitter import ChronologicalSplitter
 from src.mlops.mlflow_manager import MLflowManager
@@ -38,34 +34,94 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-
 RANDOM_STATE = 42
+
 TRAIN_RATIO = 0.70
 VALIDATION_RATIO = 0.15
 TEST_RATIO = 0.15
 
 N_ESTIMATORS = 300
-MIN_SAMPLES_SPLIT = 5
-MIN_SAMPLES_LEAF = 2
+MAX_DEPTH = 6
+LEARNING_RATE = 0.05
+SUBSAMPLE = 0.80
+COLSAMPLE_BYTREE = 0.80
 
 
-def train_random_forest_v3(
+TARGET_MAPPING = {
+    -1: 0,
+    0: 1,
+    1: 2,
+}
+
+INVERSE_TARGET_MAPPING = {
+    0: -1,
+    1: 0,
+    2: 1,
+}
+
+
+def encode_target(
+    target: pd.Series,
+) -> pd.Series:
+    """
+    Convertit :
+    SELL -1 vers 0
+    NO_TRADE 0 vers 1
+    BUY 1 vers 2
+    """
+
+    encoded = target.map(TARGET_MAPPING)
+
+    if encoded.isna().any():
+        invalid_values = target[
+            encoded.isna()
+        ].unique()
+
+        raise ValueError(
+            f"Classes target invalides : {invalid_values}"
+        )
+
+    return encoded.astype(int)
+
+
+def decode_target(
+    target: pd.Series,
+) -> pd.Series:
+    """
+    Reconvertit les classes XGBoost vers -1, 0 et 1.
+    """
+
+    decoded = target.map(INVERSE_TARGET_MAPPING)
+
+    if decoded.isna().any():
+        invalid_values = target[
+            decoded.isna()
+        ].unique()
+
+        raise ValueError(
+            f"Classes XGBoost invalides : {invalid_values}"
+        )
+
+    return decoded.astype(int)
+
+
+def train_xgboost_v3(
     symbol: str,
     timeframe: str,
 ) -> None:
     """
-    Entraîne un modèle Random Forest V3.
+    Entraîne XGBoost V3 pour un symbole et un timeframe.
     """
 
     trainer = BaseTrainer(
         symbol=symbol,
         timeframe=timeframe,
-        model_name="random_forest",
+        model_name="xgboost",
     )
 
     df = trainer.load_analysis_dataset()
 
-    X, y = trainer.prepare_tabular_features(df)
+    X, y_original = trainer.prepare_tabular_features(df)
 
     splitter = ChronologicalSplitter(
         train_ratio=TRAIN_RATIO,
@@ -74,45 +130,59 @@ def train_random_forest_v3(
 
     split = splitter.split(
         X=X,
-        y=y,
+        y=y_original,
     )
 
     X_train = split.X_train
     X_validation = split.X_validation
     X_test = split.X_test
 
-    y_train = split.y_train
-    y_validation = split.y_validation
-    y_test = split.y_test
+    y_train_original = split.y_train
+    y_validation_original = split.y_validation
+    y_test_original = split.y_test
+
+    y_train = encode_target(y_train_original)
+    y_validation = encode_target(y_validation_original)
+    #y_test = encode_target(y_test_original)
 
     logger.info(f"Symbole : {trainer.symbol}")
     logger.info(f"Timeframe : {trainer.timeframe}")
     logger.info(f"Nombre de features : {X.shape[1]}")
+
     logger.info(f"X_train : {X_train.shape}")
     logger.info(f"X_validation : {X_validation.shape}")
     logger.info(f"X_test : {X_test.shape}")
+
     logger.info(
-        f"Distribution train :\n{y_train.value_counts()}"
-    )
-    logger.info(
-        f"Distribution validation :\n{y_validation.value_counts()}"
-    )
-    logger.info(
-        f"Distribution test :\n{y_test.value_counts()}"
+        f"Distribution train :\n"
+        f"{y_train_original.value_counts()}"
     )
 
-    model = RandomForestClassifier(
+    logger.info(
+        f"Distribution validation :\n"
+        f"{y_validation_original.value_counts()}"
+    )
+
+    logger.info(
+        f"Distribution test :\n"
+        f"{y_test_original.value_counts()}"
+    )
+
+    model = XGBClassifier(
         n_estimators=N_ESTIMATORS,
-        max_depth=None,
-        min_samples_split=MIN_SAMPLES_SPLIT,
-        min_samples_leaf=MIN_SAMPLES_LEAF,
-        class_weight="balanced",
+        max_depth=MAX_DEPTH,
+        learning_rate=LEARNING_RATE,
+        subsample=SUBSAMPLE,
+        colsample_bytree=COLSAMPLE_BYTREE,
+        objective="multi:softprob",
+        num_class=3,
+        eval_metric="mlogloss",
         random_state=RANDOM_STATE,
         n_jobs=-1,
     )
 
     run_name = (
-        f"random_forest_v3_"
+        f"xgboost_v3_"
         f"{trainer.symbol}_"
         f"{trainer.timeframe}"
     )
@@ -127,62 +197,79 @@ def train_random_forest_v3(
         run_name=run_name
     ):
         logger.info(
-            "Début de l'entraînement Random Forest V3."
+            "Début de l'entraînement XGBoost V3."
         )
 
         model.fit(
             X_train,
             y_train,
+            eval_set=[
+                (
+                    X_validation,
+                    y_validation,
+                )
+            ],
+            verbose=False,
         )
 
-        validation_predictions = model.predict(
-            X_validation
+        validation_predictions_encoded = pd.Series(
+            model.predict(X_validation),
+            index=X_validation.index,
         )
 
-        test_predictions = model.predict(
-            X_test
+        test_predictions_encoded = pd.Series(
+            model.predict(X_test),
+            index=X_test.index,
+        )
+
+        validation_predictions = decode_target(
+            validation_predictions_encoded
+        )
+
+        test_predictions = decode_target(
+            test_predictions_encoded
         )
 
         validation_accuracy = accuracy_score(
-            y_validation,
+            y_validation_original,
             validation_predictions,
         )
 
         validation_f1_macro = f1_score(
-            y_validation,
+            y_validation_original,
             validation_predictions,
             average="macro",
             zero_division=0,
         )
 
         validation_f1_weighted = f1_score(
-            y_validation,
+            y_validation_original,
             validation_predictions,
             average="weighted",
             zero_division=0,
         )
 
         test_accuracy = accuracy_score(
-            y_test,
+            y_test_original,
             test_predictions,
         )
 
         test_f1_macro = f1_score(
-            y_test,
+            y_test_original,
             test_predictions,
             average="macro",
             zero_division=0,
         )
 
         test_f1_weighted = f1_score(
-            y_test,
+            y_test_original,
             test_predictions,
             average="weighted",
             zero_division=0,
         )
 
         validation_report = classification_report(
-            y_validation,
+            y_validation_original,
             validation_predictions,
             labels=[-1, 0, 1],
             target_names=[
@@ -194,7 +281,7 @@ def train_random_forest_v3(
         )
 
         test_report = classification_report(
-            y_test,
+            y_test_original,
             test_predictions,
             labels=[-1, 0, 1],
             target_names=[
@@ -244,15 +331,15 @@ def train_random_forest_v3(
         )
 
         mlflow_manager.log_params({
-            "model_type": "RandomForestClassifier",
+            "model_type": "XGBClassifier",
             "symbol": trainer.symbol,
             "timeframe": trainer.timeframe,
             "dataset": str(trainer.dataset_path),
             "n_estimators": N_ESTIMATORS,
-            "max_depth": "None",
-            "min_samples_split": MIN_SAMPLES_SPLIT,
-            "min_samples_leaf": MIN_SAMPLES_LEAF,
-            "class_weight": "balanced",
+            "max_depth": MAX_DEPTH,
+            "learning_rate": LEARNING_RATE,
+            "subsample": SUBSAMPLE,
+            "colsample_bytree": COLSAMPLE_BYTREE,
             "features_count": X_train.shape[1],
             "split_type": "chronological",
             "train_ratio": TRAIN_RATIO,
@@ -282,14 +369,14 @@ def train_random_forest_v3(
             ),
         })
 
-        mlflow_manager.log_sklearn_model(
+        mlflow_manager.log_xgboost_model(
             model=model,
             artifact_name=run_name,
         )
 
         model_path = (
             trainer.model_dir
-            / "random_forest_v3.pkl"
+            / "xgboost_v3.pkl"
         )
 
         metadata_path = (
@@ -317,13 +404,21 @@ def train_random_forest_v3(
             "features": X_train.columns.tolist(),
             "symbol": trainer.symbol,
             "timeframe": trainer.timeframe,
+            "target_mapping": TARGET_MAPPING,
+            "inverse_target_mapping": (
+                INVERSE_TARGET_MAPPING
+            ),
             "split_type": "chronological",
             "train_ratio": TRAIN_RATIO,
             "validation_ratio": VALIDATION_RATIO,
             "test_ratio": TEST_RATIO,
             "metrics": {
-                "validation_accuracy": validation_accuracy,
-                "validation_f1_macro": validation_f1_macro,
+                "validation_accuracy": (
+                    validation_accuracy
+                ),
+                "validation_f1_macro": (
+                    validation_f1_macro
+                ),
                 "validation_f1_weighted": (
                     validation_f1_weighted
                 ),
@@ -341,7 +436,7 @@ def train_random_forest_v3(
         )
 
         metadata = {
-            "model_type": "RandomForestClassifier",
+            "model_type": "XGBClassifier",
             "symbol": trainer.symbol,
             "timeframe": trainer.timeframe,
             "feature_count": X_train.shape[1],
@@ -351,6 +446,10 @@ def train_random_forest_v3(
             "validation_ratio": VALIDATION_RATIO,
             "test_ratio": TEST_RATIO,
             "random_state": RANDOM_STATE,
+            "target_mapping": TARGET_MAPPING,
+            "inverse_target_mapping": (
+                INVERSE_TARGET_MAPPING
+            ),
         }
 
         metrics = {
@@ -407,26 +506,28 @@ def train_random_forest_v3(
         )
 
         logger.info(
-            f"Métadonnées sauvegardées : {metadata_path}"
+            f"Métadonnées sauvegardées : "
+            f"{metadata_path}"
         )
 
         logger.info(
-            f"Métriques sauvegardées : {metrics_path}"
+            f"Métriques sauvegardées : "
+            f"{metrics_path}"
         )
 
     logger.info(
-        "Entraînement Random Forest V3 terminé."
+        "Entraînement XGBoost V3 terminé."
     )
 
 
 def parse_arguments() -> argparse.Namespace:
     """
-    Lit les paramètres de la ligne de commande.
+    Lit les arguments de la ligne de commande.
     """
 
     parser = argparse.ArgumentParser(
         description=(
-            "Entraîner Random Forest V3 "
+            "Entraîner XGBoost V3 "
             "avec un split chronologique."
         )
     )
@@ -458,7 +559,7 @@ def parse_arguments() -> argparse.Namespace:
 if __name__ == "__main__":
     arguments = parse_arguments()
 
-    train_random_forest_v3(
+    train_xgboost_v3(
         symbol=arguments.symbol,
         timeframe=arguments.timeframe,
     )

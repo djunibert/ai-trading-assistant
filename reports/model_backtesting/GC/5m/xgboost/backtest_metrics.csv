@@ -1,0 +1,2 @@
+﻿total_observations,total_trades,buy_trades,sell_trades,wins,losses,breakeven,win_rate_percent,signal_accuracy_percent,gross_profit,gross_loss,net_return_sum,compounded_return,profit_factor,expectancy,average_win,average_loss,max_drawdown,sharpe_ratio
+4056,104,52,52,73,30,1,70.19,80.55,0.11558602,0.03915129,0.07643474,0.07919856,2.9523,0.00073495,0.00158337,-0.00130504,-0.01285573,6.1062

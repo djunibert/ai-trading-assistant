@@ -32,7 +32,6 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from tensorflow.keras.models import load_model
 
 from src.data.chronological_splitter import ChronologicalSplitter
 from src.training.base_trainer import BaseTrainer
@@ -74,21 +73,6 @@ def get_analysis_dataset_path(
         Path("data/final/analysis")
         / symbol
         / f"dataset_analysis_v3_{symbol}_{timeframe}.csv"
-    )
-
-
-def get_ml_dataset_path(
-    symbol: str,
-    timeframe: str,
-) -> Path:
-    """
-    Retourne le chemin du dataset ML V3.
-    """
-
-    return (
-        Path("data/final/ml")
-        / symbol
-        / f"dataset_ml_v3_{symbol}_{timeframe}.csv"
     )
 
 
@@ -203,38 +187,6 @@ def load_analysis_dataset(
     return df
 
 
-def load_ml_dataset(
-    symbol: str,
-    timeframe: str,
-) -> pd.DataFrame:
-    """
-    Charge le dataset ML utilisé par Random Forest et XGBoost.
-    """
-
-    dataset_path = get_ml_dataset_path(
-        symbol=symbol,
-        timeframe=timeframe,
-    )
-
-    if not dataset_path.exists():
-        raise FileNotFoundError(
-            f"Dataset ML introuvable : {dataset_path}"
-        )
-
-    logger.info(
-        f"Chargement du dataset ML : {dataset_path}"
-    )
-
-    df = pd.read_csv(dataset_path)
-
-    if "target" not in df.columns:
-        raise ValueError(
-            "La colonne target est absente du dataset ML."
-        )
-
-    return df
-
-
 def load_tabular_model_bundle(
     symbol: str,
     timeframe: str,
@@ -339,43 +291,20 @@ def load_lstm_bundle(
         f"Chargement du modèle LSTM : {model_path}"
     )
 
+    try:
+        from tensorflow.keras.models import load_model
+    except ModuleNotFoundError as error:
+        raise ModuleNotFoundError(
+            "TensorFlow est requis uniquement pour backtester le modèle LSTM. "
+            "Installe-le avec : pip install tensorflow"
+        ) from error
+
     return {
         "model": load_model(model_path),
         "scaler": joblib.load(scaler_path),
         "features": joblib.load(features_path),
         "sequence_length": sequence_length,
     }
-
-
-def create_tabular_test_data(
-    ml_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Recrée le même découpage chronologique que celui utilisé
-    pendant l'entraînement de Random Forest et XGBoost.
-    """
-
-    X = ml_df.drop(
-        columns=[
-            "target",
-            "future_return_1",
-        ],
-        errors="ignore",
-    )
-
-    y = ml_df["target"].astype(int)
-
-    splitter = ChronologicalSplitter(
-        train_ratio=TRAIN_RATIO,
-        validation_ratio=VALIDATION_RATIO,
-    )
-
-    split = splitter.split(
-        X=X,
-        y=y,
-    )
-
-    return split.X_test, split.y_test
 
 
 def decode_xgboost_predictions(
@@ -418,22 +347,33 @@ def predict_tabular_model(
 ) -> pd.DataFrame:
     """
     Produit les prédictions Random Forest ou XGBoost.
+
+    Les features sont reconstruites depuis dataset_analysis_v3
+    exactement comme pendant l'entraînement.
     """
 
-    ml_df = load_ml_dataset(
+    trainer = BaseTrainer(
         symbol=symbol,
         timeframe=timeframe,
+        model_name=model_name,
     )
 
-    if len(ml_df) != len(analysis_df):
-        raise ValueError(
-            "Les datasets ML et Analysis n'ont pas "
-            "le même nombre de lignes."
-        )
-
-    X_test, y_test = create_tabular_test_data(
-        ml_df=ml_df,
+    X, y = trainer.prepare_tabular_features(
+        analysis_df
     )
+
+    splitter = ChronologicalSplitter(
+        train_ratio=TRAIN_RATIO,
+        validation_ratio=VALIDATION_RATIO,
+    )
+
+    split = splitter.split(
+        X=X,
+        y=y,
+    )
+
+    X_test = split.X_test
+    y_test = split.y_test
 
     bundle = load_tabular_model_bundle(
         symbol=symbol,
@@ -495,8 +435,9 @@ def predict_tabular_model(
         .astype(int)
     )
 
-    result_df["prediction"] = (
-        np.asarray(predictions, dtype=int)
+    result_df["prediction"] = np.asarray(
+        predictions,
+        dtype=int,
     )
 
     result_df["future_return"] = (
@@ -505,7 +446,6 @@ def predict_tabular_model(
     )
 
     return result_df
-
 
 def encode_lstm_target(
     values: np.ndarray,

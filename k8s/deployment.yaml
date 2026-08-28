@@ -19,7 +19,8 @@ spec:
     spec:
       containers:
         - name: ai-trading-api
-          image: ghcr.io/djunibert/ai-trading-assistant:latest
+          image: ai-trading-system:local
+          imagePullPolicy: Never
 
           ports:
             - containerPort: 8000

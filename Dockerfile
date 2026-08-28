@@ -8,7 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -18,6 +20,11 @@ RUN python -m pip install --upgrade pip \
     && python scripts/prepare_requirements.py \
         --output requirements-linux.txt \
         --exclude-package pywin32 \
+    && sed -i \
+        -e '/^pywin32/d' \
+        -e '/^pywinpty/d' \
+        -e '/^windows-/d' \
+        requirements-linux.txt \
     && python -m pip install -r requirements-linux.txt
 
 COPY backend ./backend

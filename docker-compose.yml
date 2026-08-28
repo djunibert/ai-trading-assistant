@@ -8,13 +8,9 @@ services:
     container_name: ai-trading-api
 
     environment:
-      PORT: 8000
-
-      MODEL_PATH: >
-        /app/models/GC/5m/random_forest/random_forest_v3.pkl
-
+      PORT: "8000"
+      MODEL_PATH: /app/models/GC/5m/random_forest/random_forest_v3.pkl
       DATABASE_URL: ${DATABASE_URL}
-
       MLFLOW_TRACKING_URI: http://mlflow:5000
 
     ports:
@@ -42,6 +38,8 @@ services:
       - 0.0.0.0
       - --port
       - "5000"
+      - --workers
+      - "1"
       - --backend-store-uri
       - sqlite:////mlflow-data/mlflow.db
       - --default-artifact-root
@@ -56,19 +54,17 @@ services:
 
     healthcheck:
       test:
-        - CMD
-        - python
-        - -c
+        - CMD-SHELL
         - >
-          import urllib.request;
+          python -c "import urllib.request;
           urllib.request.urlopen(
           'http://127.0.0.1:5000/health',
-          timeout=3
-          )
+          timeout=5
+          ).read()"
       interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
     restart: unless-stopped
 

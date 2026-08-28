@@ -1,0 +1,73 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: ai-trading-system:local
+    container_name: ai-trading-api
+
+    environment:
+      PORT: "8000"
+      MODEL_PATH: /app/models/GC/5m/random_forest/random_forest_v3.pkl
+      DATABASE_URL: ${DATABASE_URL}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - ./data:/app/data:ro
+      - ./models:/app/models:ro
+      - ./reports:/app/reports
+
+    depends_on:
+      mlflow:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.13.0
+    container_name: ai-trading-mlflow
+
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --workers
+      - "1"
+      - --backend-store-uri
+      - sqlite:////mlflow-data/mlflow.db
+      - --default-artifact-root
+      - /mlflow-artifacts
+
+    ports:
+      - "5000:5000"
+
+    volumes:
+      - mlflow-data:/mlflow-data
+      - mlflow-artifacts:/mlflow-artifacts
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          python -c "import urllib.request;
+          urllib.request.urlopen(
+          'http://127.0.0.1:5000/health',
+          timeout=5
+          ).read()"
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+    restart: unless-stopped
+
+volumes:
+  mlflow-data:
+  mlflow-artifacts:

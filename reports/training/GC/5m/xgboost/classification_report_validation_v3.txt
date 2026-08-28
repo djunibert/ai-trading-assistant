@@ -1,0 +1,9 @@
+              precision    recall  f1-score   support
+
+        SELL       0.51      0.06      0.10       362
+    NO_TRADE       0.78      0.98      0.87      2339
+         BUY       0.41      0.06      0.11       341
+
+    accuracy                           0.77      3042
+   macro avg       0.57      0.37      0.36      3042
+weighted avg       0.71      0.77      0.69      3042

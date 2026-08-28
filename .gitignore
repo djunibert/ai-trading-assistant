@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Python
 __pycache__/
 *.pyc
@@ -249,3 +250,31 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 >>>>>>> 04ff28bd9fb9d61521eaf2083420f3da2308ded4
+=======
+.venv/
+__pycache__/
+*.pyc
+
+.env
+mlruns/
+
+data/raw/**
+data/processed/
+data/features/
+data/final/**
+
+!data/raw/**/*.dvc
+!data/final/**/*.dvc
+
+.ipynb_checkpoints/
+.vscode/
+setup_git_push.ps1
+models/
+
+# Modèles et artefacts ML
+models/
+*.pkl
+*.joblib
+*.keras
+mlruns/
+>>>>>>> architecture-v2

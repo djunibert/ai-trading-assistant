@@ -1,0 +1,19 @@
+{
+    "total_trades": 3,
+    "wins": 1,
+    "losses": 2,
+    "win_rate": 33.33,
+    "total_pnl": -30.8,
+    "profit_factor": 0.52,
+    "expectancy": -10.27,
+    "max_drawdown": -58.1,
+    "average_win": 34.0,
+    "average_loss": -32.4,
+    "gross_profit": 34.0,
+    "gross_loss": -64.8,
+    "average_trade": -10.27,
+    "best_trade": 34.0,
+    "worst_trade": -58.1,
+    "longest_win_streak": 1,
+    "longest_loss_streak": 1
+}

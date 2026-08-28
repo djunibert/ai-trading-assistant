@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: ai-trading-api
+
+spec:
+  selector:
+    app: ai-trading-api
+
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+
+  type: LoadBalancer

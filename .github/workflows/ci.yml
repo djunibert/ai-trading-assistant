@@ -1,0 +1,103 @@
+name: CI Python
+
+on:
+  push:
+    branches:
+      - main
+      - architecture-v2
+
+  pull_request:
+    branches:
+      - main
+      - architecture-v2
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-security-tests:
+    name: Qualité, sécurité et tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      TF_CPP_MIN_LOG_LEVEL: "2"
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Mettre à jour pip
+        run: python -m pip install --upgrade pip
+
+      - name: Installer les dépendances
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff bandit pip-audit
+
+      - name: Créer les dossiers de rapports
+        run: |
+          mkdir -p reports/ci
+          mkdir -p reports/coverage
+
+      - name: Vérifier la syntaxe Python
+        run: |
+          python -m compileall src tests backend
+
+      - name: Vérifier le code avec Ruff
+        run: |
+          ruff check src tests backend \
+            --output-format=github
+
+      - name: Analyser la sécurité du code
+        continue-on-error: true
+        run: |
+          bandit -r src backend \
+            -f json \
+            -o reports/ci/bandit-report.json
+
+      - name: Auditer les dépendances
+        continue-on-error: true
+        run: |
+          pip-audit \
+            -r requirements.txt \
+            --format json \
+            --output reports/ci/pip-audit-report.json
+
+      - name: Vérifier les imports principaux
+        run: |
+          python -c "from src.pipelines.market_structure_pipeline import MarketStructurePipeline; print('MarketStructurePipeline OK')"
+          python -c "from src.backtesting.backtesting_engine import BacktestingEngine; print('BacktestingEngine OK')"
+          python -c "from src.data.chronological_splitter import ChronologicalSplitter; print('ChronologicalSplitter OK')"
+          python -c "from src.mlops.mlflow_manager import MLflowManager; print('MLflowManager OK')"
+          python -c "from src.trading.signal_engine import SignalEngine; print('SignalEngine OK')"
+
+      - name: Exécuter les tests avec couverture
+        run: |
+          pytest tests \
+            -q \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml:reports/coverage/coverage.xml \
+            --cov-report=html:reports/coverage/html
+
+      - name: Publier les rapports CI
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapports-ci-python
+          path: |
+            reports/ci/
+            reports/coverage/
+          if-no-files-found: warn
+          retention-days: 14
